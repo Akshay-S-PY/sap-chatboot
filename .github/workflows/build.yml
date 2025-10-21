@@ -38,7 +38,6 @@ jobs:
           python tools/02_clean_chunk.py
           python tools/03_embed_build.py
 
-      # Decide whether to keep artifacts in repo (<=90MB) or upload to Hugging Face (>90MB)
       - name: Decide storage (repo vs HF)
         id: decide
         shell: bash
@@ -71,14 +70,5 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_REPO: ${{ secrets.HF_DATASET_REPO }}   # e.g. your_username/sap-basis-rag
-        shell: bash
         run: |
-          python -c "import os, pathlib, sys; \
-from huggingface_hub import HfApi; \
-repo=os.environ.get('HF_REPO'); token=os.environ.get('HF_TOKEN'); \
-assert repo and token, 'HF_REPO or HF_TOKEN missing'; \
-api=HfApi(token=token); api.create_repo(repo_id=repo, repo_type='dataset', exist_ok=True); \
-files=[('index/index.faiss','index.faiss'),('index/meta.json','meta.json'),('index/dim.json','dim.json')]; \
-[api.upload_file(path_or_fileobj=src, path_in_repo=dst, repo_id=repo, repo_type='dataset') \
- for src,dst in files if pathlib.Path(src).exists()]; \
-print('Uploaded to', repo)"
+          python tools/upload_to_hf.py
