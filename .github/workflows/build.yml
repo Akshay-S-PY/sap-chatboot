@@ -1,9 +1,10 @@
-name: Crawl & Build (SAP Basis)
+# .github/workflows/build.yml
+name: SAP Basis Knowledge Base Builder
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # daily 06:00 UTC
+    - cron: "0 6 * * *"   # Daily 06:00 UTC
 
 jobs:
   build:
@@ -18,66 +19,34 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python deps
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 playwright trafilatura tqdm \
-                      sentence-transformers faiss-cpu numpy huggingface_hub
+          pip install -r requirements.txt
 
-      - name: Install Playwright Chromium
-        run: python -m playwright install --with-deps chromium
+      - name: Install Playwright
+        run: |
+          python -m playwright install --with-deps chromium
 
-      - name: Discover Basis article URLs
+      - name: Discover SAP Basis URLs
         run: python tools/00_discover_basis.py
 
-      - name: Fetch (rendered)
+      - name: Fetch and extract content
         run: python tools/01_fetch_rendered.py
 
-      - name: Debug fetched files
-        run: |
-          echo "=== seeds ==="
-          sed -n '1,200p' data/seeds.txt || true
-          echo "=== raw md files ==="
-          ls -lh data/raw/*.md || true
-          echo "=== sample md ==="
-          head -n 40 $(ls data/raw/*.md | head -n 1) || true
-
-      - name: Build index
+      - name: Build knowledge index
         run: |
           python tools/02_clean_chunk.py
           python tools/03_embed_build.py
 
-      - name: Decide storage (repo vs HF)
-        id: decide
-        shell: bash
-        run: |
-          if [ -f index/index.faiss ]; then
-            BYTES=$(stat -c%s index/index.faiss)
-          else
-            BYTES=0
-          fi
-          echo "size=$BYTES" >> "$GITHUB_OUTPUT"
-          if [ "$BYTES" -le 90000000 ]; then
-            echo "store=repo" >> "$GITHUB_OUTPUT"
-          else
-            echo "store=hf" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commit artifacts to repo (if small)
-        if: steps.decide.outputs.store == 'repo'
-        run: |
-          git config user.name "rag-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add data/seeds.txt -A || true
-          git add data/raw/*.md -A || true
-          git add index/index.faiss index/meta.json index/dim.json || true
-          git commit -m "basis: crawl + index rebuild" || echo "no changes"
-          git push || true
-
-      - name: Upload artifacts to Hugging Face (if large)
-        if: steps.decide.outputs.store == 'hf'
+      - name: Upload to Hugging Face Hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_REPO: ${{ secrets.HF_DATASET_REPO }}   # e.g. your_username/sap-basis-rag
+          HF_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           python tools/upload_to_hf.py
+
+      - name: Notify completion
+        run: |
+          echo "Knowledge base updated successfully!"
+          echo "Repository: ${{ secrets.HF_DATASET_REPO }}"
