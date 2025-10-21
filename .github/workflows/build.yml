@@ -33,6 +33,15 @@ jobs:
       - name: Fetch (rendered)
         run: python tools/01_fetch_rendered.py
 
+      - name: Debug fetched files
+        run: |
+          echo "=== seeds ==="
+          sed -n '1,200p' data/seeds.txt || true
+          echo "=== raw md files ==="
+          ls -lh data/raw/*.md || true
+          echo "=== sample md ==="
+          head -n 40 $(ls data/raw/*.md | head -n 1) || true
+
       - name: Build index
         run: |
           python tools/02_clean_chunk.py
