@@ -3,7 +3,7 @@ name: Crawl & Build (SAP Basis)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # daily at 06:00 UTC (optional)
+    - cron: "0 6 * * *"   # daily 06:00 UTC
 
 jobs:
   build:
@@ -21,9 +21,8 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install \
-            requests beautifulsoup4 playwright trafilatura tqdm \
-            sentence-transformers faiss-cpu numpy huggingface_hub
+          pip install requests beautifulsoup4 playwright trafilatura tqdm \
+                      sentence-transformers faiss-cpu numpy huggingface_hub
 
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
@@ -39,13 +38,13 @@ jobs:
           python tools/02_clean_chunk.py
           python tools/03_embed_build.py
 
-      # Decide whether to store artifacts in repo (<=90MB) or Hugging Face (>90MB)
-      - name: Decide storage (repo vs. Hugging Face)
+      # Decide whether to keep artifacts in repo (<=90MB) or upload to Hugging Face (>90MB)
+      - name: Decide storage (repo vs HF)
         id: decide
         shell: bash
         run: |
           if [ -f index/index.faiss ]; then
-            BYTES=$(stat -c%s "index/index.faiss")
+            BYTES=$(stat -c%s index/index.faiss)
           else
             BYTES=0
           fi
@@ -74,24 +73,12 @@ jobs:
           HF_REPO: ${{ secrets.HF_DATASET_REPO }}   # e.g. your_username/sap-basis-rag
         shell: bash
         run: |
-          python - <<'PY'
-from huggingface_hub import HfApi
-import os, sys, pathlib
-repo = os.environ.get("HF_REPO")
-token = os.environ.get("HF_TOKEN")
-if not repo or not token:
-    print("HF_REPO or HF_TOKEN not set; cannot upload.", file=sys.stderr)
-    sys.exit(1)
-api = HfApi(token=token)
-api.create_repo(repo_id=repo, repo_type="dataset", exist_ok=True)
-files = [
-    ("index/index.faiss", "index.faiss"),
-    ("index/meta.json",  "meta.json"),
-    ("index/dim.json",   "dim.json"),
-]
-for src, dst in files:
-    if pathlib.Path(src).exists():
-        api.upload_file(path_or_fileobj=src, path_in_repo=dst,
-                        repo_id=repo, repo_type="dataset")
-print("Uploaded artifacts to", repo)
-PY
+          python -c "import os, pathlib, sys; \
+from huggingface_hub import HfApi; \
+repo=os.environ.get('HF_REPO'); token=os.environ.get('HF_TOKEN'); \
+assert repo and token, 'HF_REPO or HF_TOKEN missing'; \
+api=HfApi(token=token); api.create_repo(repo_id=repo, repo_type='dataset', exist_ok=True); \
+files=[('index/index.faiss','index.faiss'),('index/meta.json','meta.json'),('index/dim.json','dim.json')]; \
+[api.upload_file(path_or_fileobj=src, path_in_repo=dst, repo_id=repo, repo_type='dataset') \
+ for src,dst in files if pathlib.Path(src).exists()]; \
+print('Uploaded to', repo)"
