@@ -1,167 +1,138 @@
 # app.py
-import json, os
-from pathlib import Path
-import numpy as np
 import streamlit as st
-import faiss
-from sentence_transformers import SentenceTransformer
-from huggingface_hub import hf_hub_download, list_repo_files
+import json
+from huggingface_hub import hf_hub_download
+import os
+import re
 
-st.set_page_config(page_title="SAP Basis Chatbot", page_icon="🧩", layout="wide")
-st.title("🧩 SAP Basis Expert Assistant")
-st.caption("Free RAG over comprehensive SAP Basis documentation and community content")
+st.set_page_config(
+    page_title="SAP Basis Chatbot",
+    page_icon="🧩",
+    layout="wide"
+)
 
-# Configuration
-HF_REPO = os.getenv("HF_DATASET_REPO", "your-username/sap-basis-rag")  # Set this in Streamlit Cloud
-USE_HF = True  # Always use HF for robustness
+st.title("🧩 SAP Basis Assistant")
+st.markdown("Ask questions about SAP Basis administration, monitoring, and best practices.")
 
-@st.cache_resource(show_spinner="Loading knowledge base...")
-def load_artifacts():
-    """Load FAISS index and metadata from Hugging Face Hub"""
+# Configuration - using your GitHub secrets
+HF_REPO = os.getenv("HF_DATASET_REPO", "your-username/sap-basis-dataset")  # Will be set in Streamlit Cloud
+
+@st.cache_resource
+def load_dataset():
+    """Load dataset from Hugging Face"""
     try:
-        # Get available files
-        files = set(list_repo_files(HF_REPO))
-        st.info(f"Available files in {HF_REPO}: {list(files)}")
+        st.info("📥 Loading SAP Basis knowledge base...")
+        dataset_path = hf_hub_download(
+            repo_id=HF_REPO,
+            filename="sap_basis_dataset.json",
+            token=os.getenv("HF_TOKEN")  # Optional: if dataset is private
+        )
         
-        # Download artifacts
-        faiss_path = hf_hub_download(HF_REPO, filename="index.faiss")
-        meta_path = hf_hub_download(HF_REPO, filename="meta.json") 
-        dim_path = hf_hub_download(HF_REPO, filename="dim.json")
+        with open(dataset_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
         
-        # Load artifacts
-        index = faiss.read_index(faiss_path)
-        meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
-        dim_data = json.loads(Path(dim_path).read_text(encoding="utf-8"))
-        dim = dim_data["dim"]
-        
-        st.success(f"✓ Loaded {len(meta)} knowledge passages")
-        return index, meta, dim
+        st.success(f"✅ Loaded {len(data)} SAP Basis documents")
+        return data
         
     except Exception as e:
-        st.error(f"Failed to load knowledge base: {e}")
-        st.info("Please ensure:")
+        st.error(f"❌ Failed to load dataset: {e}")
+        st.info("Please make sure:")
         st.info("1. HF_DATASET_REPO is set in Streamlit secrets")
-        st.info("2. The repository contains index.faiss, meta.json, and dim.json")
-        st.info("3. You have access to the repository")
-        return None, [], 384
+        st.info("2. The dataset exists at the specified repository")
+        return []
 
-@st.cache_resource(show_spinner=False)
-def load_embedder():
-    return SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-def embed_query(model, query):
-    return model.encode([query], normalize_embeddings=True, convert_to_numpy=True).astype("float32")
-
-def search(index, query_vector, k=5):
-    similarities, indices = index.search(query_vector, k)
-    return indices[0].tolist(), similarities[0].tolist()
-
-def format_answer(query, context_passages):
-    if not context_passages:
-        return "I couldn't find relevant information in my knowledge base. Try rephrasing your question or ask about SAP Basis administration, transport management, system monitoring, or security."
+def search_documents(query, documents, top_k=5):
+    """Simple but effective search"""
+    query = query.lower().strip()
+    results = []
     
-    # Build concise answer
-    answer_parts = []
-    for i, passage in enumerate(context_passages, 1):
-        # Extract first meaningful sentences
-        text = passage["text"].replace("\n", " ").strip()
-        sentences = [s.strip() for s in text.split(". ") if s.strip()]
-        if sentences:
-            snippet = ". ".join(sentences[:2]) + "."
-            answer_parts.append(f"{snippet} [{i}]")
+    for doc in documents:
+        score = 0
+        
+        # Combine title and content for search
+        text = f"{doc.get('title', '')} {doc.get('content', '')}".lower()
+        
+        # Exact phrase matches
+        if query in text:
+            score += 20
+            
+        # Individual word matches
+        query_words = query.split()
+        matches = sum(1 for word in query_words if word in text)
+        score += matches * 2
+        
+        # Title matches are more important
+        title = doc.get('title', '').lower()
+        if any(word in title for word in query_words):
+            score += 10
+            
+        if score > 0:
+            results.append((score, doc))
     
-    # Format output
+    # Sort by relevance
+    results.sort(key=lambda x: x[0], reverse=True)
+    return [doc for score, doc in results[:top_k]]
+
+def format_answer(results, query):
+    """Format the search results into a nice answer"""
+    if not results:
+        return "I couldn't find specific information about that topic in my knowledge base. Try asking about:\n\n- SAP Basis administration\n- System monitoring (SM50, SM66)\n- Transport Management (TMS)\n- User and security management\n- Background job processing"
+    
     response = []
-    response.append("**Answer:**")
-    response.append(" ".join(answer_parts) if answer_parts else "Relevant information found in sources below.")
+    response.append("## 📚 Found Information\n")
     
-    response.append("\n**Sources:**")
-    for i, passage in enumerate(context_passages, 1):
-        title = passage["title"][:80] + "..." if len(passage["title"]) > 80 else passage["title"]
-        response.append(f"[{i}] **{title}** — {passage['url']}")
+    for i, doc in enumerate(results, 1):
+        title = doc.get('title', 'SAP Basis Article')
+        content = doc.get('content', '')
+        
+        # Extract relevant snippet
+        sentences = re.split(r'[.!?]+', content)
+        snippet = '. '.join(sentences[:3]) + '.' if sentences else content[:300] + "..."
+        
+        response.append(f"**{i}. {title}**")
+        response.append(f"{snippet}")
+        response.append(f"*Source: {doc.get('url', 'SAP Community')}*")
+        response.append("---")
     
     return "\n\n".join(response)
 
-# Initialize session state
-if "index" not in st.session_state:
-    st.session_state.index, st.session_state.meta, st.session_state.dim = load_artifacts()
-if "embedder" not in st.session_state:
-    st.session_state.embedder = load_embedder()
+# Load dataset
+dataset = load_dataset()
 
 # Sidebar
 with st.sidebar:
-    st.header("🔧 Settings")
-    k = st.slider("Number of sources", 3, 10, 5)
+    st.header("⚙️ Settings")
+    top_k = st.slider("Number of results", 3, 10, 5)
     
     st.header("💡 Sample Questions")
-    sample_questions = [
-        "How do I analyze work processes using SM50/SM66?",
-        "What is TMS and how do I set up transport routes?",
-        "How to read system logs in SM21?",
-        "What are kernel patches and how to apply them?",
-        "How to monitor system performance?",
-        "What is client administration in SAP?",
-        "How to manage users and authorizations?",
-        "What is background job processing?"
+    samples = [
+        "How to monitor work processes?",
+        "What is TMS in SAP?",
+        "How to check system logs?",
+        "User administration best practices",
+        "Background job monitoring"
     ]
     
-    for q in sample_questions:
-        if st.button(f"• {q}", key=f"btn_{hash(q)}"):
-            st.session_state.query = q
+    for sample in samples:
+        if st.button(sample, use_container_width=True):
+            st.session_state.query = sample
 
 # Main interface
-st.markdown("""
-Ask me about:
-- **System Administration** (client copy, user management)
-- **Transport Management** (TMS, STMS, transport routes)  
-- **Performance Monitoring** (work processes, system logs)
-- **Security & Authorization** (profiles, roles)
-- **Database Administration** (backup, recovery)
-- **Kernel & Patches** (SPAM, SAINT)
-""")
-
-# Query input
-query = st.text_input(
-    "Ask your SAP Basis question:",
-    value=st.session_state.get("query", ""),
-    placeholder="e.g., How do I troubleshoot work processes?"
-)
-
-if st.button("Search", type="primary") or query:
-    if not query.strip():
-        st.warning("Please enter a question")
-    elif st.session_state.index is None:
-        st.error("Knowledge base not loaded. Please check configuration.")
-    else:
-        with st.spinner("Searching knowledge base..."):
-            try:
-                # Search
-                query_vector = embed_query(st.session_state.embedder, query)
-                indices, similarities = search(st.session_state.index, query_vector, k)
-                
-                # Get results
-                results = [st.session_state.meta[i] for i in indices if 0 <= i < len(st.session_state.meta)]
-                
-                # Display results
-                if results:
-                    st.markdown(format_answer(query, results))
-                    
-                    # Show detailed passages
-                    with st.expander("📖 View Detailed Passages"):
-                        for i, passage in enumerate(results, 1):
-                            st.markdown(f"**[{i}] {passage['title']}**")
-                            st.markdown(f"*Source: {passage['url']}*")
-                            st.write(passage["text"])
-                            st.markdown("---")
-                else:
-                    st.info("No relevant information found. Try rephrasing your question.")
-                    
-            except Exception as e:
-                st.error(f"Search error: {e}")
+if dataset:
+    query = st.text_input(
+        "💬 Ask your SAP Basis question:",
+        placeholder="e.g., How do I analyze work processes using SM50?",
+        value=st.session_state.get('query', '')
+    )
+    
+    if st.button("🔍 Search", type="primary") or query:
+        if query.strip():
+            with st.spinner("Searching knowledge base..."):
+                results = search_documents(query, dataset, top_k)
+                st.markdown(format_answer(results, query))
+else:
+    st.error("No dataset available. Please check the configuration.")
 
 # Footer
 st.markdown("---")
-st.caption("""
-**Note**: This assistant uses publicly available SAP documentation and community content. 
-Always verify critical information with official SAP resources and documentation.
-""")
+st.caption("💡 This assistant uses publicly available SAP Community content. Always verify critical information with official SAP documentation.")
