@@ -24,14 +24,37 @@ jobs:
           pip install requests beautifulsoup4 huggingface-hub
           
       - name: 🗃️ Build dataset
-        run: python tools/build_dataset.py
-        
+        run: |
+          python tools/build_dataset.py
+          echo "Dataset size:"
+          ls -la data/sap_basis_dataset.json || echo "No dataset file"
+          
+      - name: 📊 Check dataset quality
+        run: |
+          if [ -f "data/sap_basis_dataset.json" ]; then
+            echo "Dataset info:"
+            python -c "
+            import json
+            with open('data/sap_basis_dataset.json', 'r') as f:
+                data = json.load(f)
+            print(f'Articles: {len(data)}')
+            total_chars = sum(len(article.get('content', '')) for article in data)
+            print(f'Total characters: {total_chars:,}')
+            avg_length = total_chars / len(data) if data else 0
+            print(f'Average article length: {avg_length:,.0f} characters')
+            "
+          else
+            echo "❌ No dataset file created"
+            exit 1
+          fi
+          
       - name: 🚀 Upload to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
-        run: python tools/upload_to_hf.py
-        
+        run: |
+          python tools/upload_to_hf.py
+          
       - name: ✅ Completion message
         run: |
           echo "🎉 Dataset build and upload completed!"
