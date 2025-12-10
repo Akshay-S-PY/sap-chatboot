@@ -33,7 +33,7 @@ jobs:
         run: |
           if [ -f "data/sap_dataset.json" ]; then
             echo "Dataset info:"
-            python << 'EOF'
+            python - << 'EOF'
 import json
 from pathlib import Path
 
