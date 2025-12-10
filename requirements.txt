@@ -36,3 +36,9 @@ streamlit
 huggingface-hub
 supabase
 numpy
+streamlit
+huggingface-hub
+supabase
+sentence-transformers
+tqdm
+numpy
