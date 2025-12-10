@@ -65,6 +65,12 @@ jobs:
           cd ..
           rsync -av --delete --exclude .git . space/
           cd space
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
           git add -A
+          GIT_AUTHOR_NAME="github-actions[bot]" \
+          GIT_AUTHOR_EMAIL="github-actions[bot]@users.noreply.github.com" \
+          GIT_COMMITTER_NAME="github-actions[bot]" \
+          GIT_COMMITTER_EMAIL="github-actions[bot]@users.noreply.github.com" \
           git commit -m "Deploy Streamlit app (CI) [ci skip]" || echo "No changes to commit"
           git push origin HEAD:main --force
