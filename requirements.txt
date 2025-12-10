@@ -17,32 +17,15 @@ langchain>=0.1.0
 langchain-community>=0.0.10
 
 # Free LLM Options
-ollama>=0.1.0  # Local LLM support (https://ollama.ai)
-replicate>=0.20.0  # Free tier: https://replicate.com
+ollama>=0.1.0
+replicate>=0.20.0
 
 # Data Processing
 numpy>=1.24.0
 pandas>=2.0.0
 
-# Database
+# Database & Utilities
 supabase>=2.0.0
-postgrest-py>=0.15.0
-
-# Utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0
-
-# Optional: For better performance
-# torch>=2.0.0  # Uncomment if you have GPU
-# opencv-python>=4.8.0  # For image processing if needed
-
-streamlit
-huggingface-hub
-supabase
-numpy
-streamlit
-huggingface-hub
-supabase
-sentence-transformers
-tqdm
-numpy
+tqdm>=4.65.0
