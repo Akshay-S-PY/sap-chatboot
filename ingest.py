@@ -57,11 +57,11 @@ def ingest_file(filepath, source="sap-docs-scrape"):
         }
         rows.append(row)
     if rows:
-        res = supabase.table("documents").insert(rows).execute()
-        if res.error:
-            print(f"Insert error for {filepath}: {res.error}")
-        else:
+        try:
+            res = supabase.table("documents").insert(rows).execute()
             print(f"Inserted {len(rows)} chunks for {filepath}")
+        except Exception as e:
+            print(f"Insert error for {filepath}: {e}")
     return
 
 def ingest_json_dataset(json_path):
@@ -92,11 +92,11 @@ def ingest_json_dataset(json_path):
                 "embedding": emb,
             })
         if rows:
-            res = supabase.table("documents").insert(rows).execute()
-            if res.error:
-                print(f"Insert error for article {title[:60]}: {res.error}")
-            else:
+            try:
+                res = supabase.table("documents").insert(rows).execute()
                 total_rows += len(rows)
+            except Exception as e:
+                print(f"Insert error for article {title[:60]}: {e}")
     print(f"Inserted {total_rows} chunks from JSON dataset")
     return total_rows
 
