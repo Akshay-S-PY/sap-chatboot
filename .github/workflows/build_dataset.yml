@@ -27,7 +27,7 @@ jobs:
         run: |
           python tools/build_dataset.py
           echo "Dataset size:"
-          ls -la data/sap_dataset.json || echo "No dataset file"
+          ls -la data/sap*.json || echo "No dataset file"
           
       - name: 📊 Check dataset quality
         run: |
