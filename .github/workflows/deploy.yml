@@ -47,15 +47,18 @@ jobs:
         env:
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
-          HF_SPACE: Psytamaa/sap-chatbot
+          HF_SPACE: Psytamaa/sap-chatboot
         run: |
           set -e
           SPACE_GIT="https://$HF_USERNAME:$HF_WRITE_TOKEN@huggingface.co/spaces/$HF_SPACE.git"
           git clone --depth 1 "$SPACE_GIT" space || (mkdir space && git init space && cd space && git remote add origin "$SPACE_GIT" && cd ..)
+          cd space
+          git checkout -B main
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          cd ..
           rsync -av --delete --exclude .git . space/
           cd space
-                    git config user.email "github-actions[bot]@users.noreply.github.com"
-                    git config user.name "github-actions[bot]"
           git add -A
           git commit -m "Deploy Streamlit app (CI) [ci skip]" || echo "No changes to commit"
           git push origin HEAD:main --force
