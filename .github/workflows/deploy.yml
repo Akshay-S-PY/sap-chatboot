@@ -50,12 +50,12 @@ jobs:
           HF_SPACE: Psytamaa/sap-chatbot
         run: |
           set -e
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
           SPACE_GIT="https://$HF_USERNAME:$HF_WRITE_TOKEN@huggingface.co/spaces/$HF_SPACE.git"
           git clone --depth 1 "$SPACE_GIT" space || (mkdir space && git init space && cd space && git remote add origin "$SPACE_GIT" && cd ..)
           rsync -av --delete --exclude .git . space/
           cd space
+                    git config user.email "github-actions[bot]@users.noreply.github.com"
+                    git config user.name "github-actions[bot]"
           git add -A
           git commit -m "Deploy Streamlit app (CI) [ci skip]" || echo "No changes to commit"
           git push origin HEAD:main --force
