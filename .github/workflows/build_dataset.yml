@@ -41,8 +41,8 @@ print(f'Articles: {len(data)}')
 total_chars = sum(len(article.get('content', '')) for article in data)
 print(f'Total characters: {total_chars:,}')
 avg_length = total_chars / len(data) if data else 0
-print(f'Average article length: {avg_length:,.0f} characters')
-EOF
+                echo "Dataset file(s):"
+                ls -la data/sap_dataset.json || true
           else
             echo "❌ No dataset file created"
             exit 1
@@ -50,7 +50,10 @@ EOF
           
       - name: 🚀 Upload to Hugging Face
         env:
+      from pathlib import Path
+
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      print(f'File: {p} | size: {p.stat().st_size:,} bytes')
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           python tools/upload_to_hf.py
