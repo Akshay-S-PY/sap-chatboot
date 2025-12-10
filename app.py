@@ -1,447 +1,66 @@
-# app.py
-"""
-SAP Intelligent Assistant - Streamlit UI
-Free RAG-based Q&A system with local/cloud LLM support
-"""
-
-import streamlit as st
-import json
 import os
-from pathlib import Path
-from datetime import datetime
+import streamlit as st
+from huggingface_hub import InferenceApi
+from supabase import create_client
+import numpy as np
 
-# Local imports
-from tools.embeddings import RAGPipeline, load_rag_index
-from tools.agent import SAPAgent, SAGAAssistant
-import config
+# ---- Config (read from env / Space secrets) ----
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+RESULTS_K = int(os.environ.get("RESULTS_K", 5))
 
-# ============== Page Configuration ==============
-st.set_page_config(**config.STREAMLIT_PAGE_CONFIG)
+if not HF_API_TOKEN or not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("Missing one of HF_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY. Add them as Space Secrets.")
+    st.stop()
 
-# ============== Custom CSS ==============
-st.markdown("""
-<style>
-    .main-title { font-size: 2.5em; color: #1f77b4; margin-bottom: 0.3em; }
-    .subtitle { font-size: 1.2em; color: #666; margin-bottom: 2em; }
-    .source-box { 
-        background-color: #f0f2f6; 
-        padding: 1em; 
-        border-radius: 0.5em; 
-        margin: 0.5em 0;
-        border-left: 4px solid #1f77b4;
-    }
-    .success-box { background-color: #d4edda; padding: 1em; border-radius: 0.5em; }
-    .error-box { background-color: #f8d7da; padding: 1em; border-radius: 0.5em; }
-    .warning-box { background-color: #fff3cd; padding: 1em; border-radius: 0.5em; }
-</style>
-""", unsafe_allow_html=True)
+# ---- Clients ----
+inference = InferenceApi(repo_id=EMBEDDING_MODEL, token=HF_API_TOKEN)
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# ============== Session State Initialization ==============
-if 'initialized' not in st.session_state:
-    st.session_state.initialized = False
-    st.session_state.rag = None
-    st.session_state.agent = None
-    st.session_state.messages = []
-    st.session_state.system_ready = False
+st.title("SAP Docs Q&A — demo")
 
-# ============== Helper Functions ==============
-# ============== Helper Functions ==============
-@st.cache_resource
-def initialize_rag():
-    """Load RAG pipeline - from HF Hub if in Spaces, else local"""
-    try:
-        # Check if running in HF Spaces
-        hf_dataset_repo = os.getenv("HF_DATASET_REPO")
-        running_in_hf_spaces = os.getenv("SPACE_ID") is not None
-        
-        if running_in_hf_spaces and hf_dataset_repo:
-            st.info("📚 Loading from HuggingFace Hub...")
-            try:
-                rag = RAGPipeline()
-                rag.load_from_hf_hub(hf_dataset_repo)
-                st.success("✅ Vector search ready!")
-                return rag
-            except Exception as e:
-                st.warning(f"⚠️ Could not load from HF Hub: {e}")
-                st.info("Attempting local load...")
-        
-        # Fallback to local files
-        if Path(config.INDEX_PATH).exists():
-            st.info("📚 Loading vector search index...")
-            rag = load_rag_index()
-            st.success("✅ Vector search ready!")
-            return rag
+q = st.text_input("Ask a question about SAP docs:", "")
+
+if st.button("Search") and q.strip():
+    with st.spinner("Computing embeddings..."):
+        # Hugging Face InferenceApi for embeddings returns list[float]
+        emb_res = inference(inputs=q)  # for sentence transformers, this returns embedding vector
+        # Some models return nested lists; flatten robustly:
+        if isinstance(emb_res, dict) and "error" in emb_res:
+            st.error(f"Hugging Face error: {emb_res['error']}")
+            st.stop()
+        # Try to coerce into 1D float list
+        if isinstance(emb_res, list) and len(emb_res) > 0 and isinstance(emb_res[0], list):
+            query_vector = emb_res[0]
         else:
-            st.warning("⚠️ RAG index not found. Please run the dataset builder first.")
-            return None
-    except Exception as e:
-        st.error(f"❌ Error loading RAG: {e}")
-        return None
+            query_vector = emb_res
 
-@st.cache_resource
-def initialize_agent():
-    """Initialize LLM Agent"""
-    try:
-        agent = SAPAgent(
-            llm_provider=config.LLM_PROVIDER,
-            model=config.DEFAULT_MODEL
-        )
-        return agent
-    except Exception as e:
-        st.error(f"❌ Error initializing agent: {e}")
-        return None
+    # Convert to Python list of floats (Postgres expects array-like)
+    query_vector = [float(x) for x in query_vector]
 
-def initialize_system():
-    """Initialize the entire system"""
-    if st.session_state.initialized:
-        return
-    
-    with st.spinner("Initializing SAP Assistant..."):
-        st.session_state.rag = initialize_rag()
-        st.session_state.agent = initialize_agent()
-        st.session_state.system_ready = (
-            st.session_state.rag is not None and 
-            st.session_state.agent is not None
-        )
-        st.session_state.initialized = True
-    
-    return st.session_state.system_ready
+    with st.spinner("Querying Supabase..."):
+        # Call the search_documents RPC we created server-side
+        # supabase.rpc expects the parameter names to match function signature
+        # We pass query_embedding as a list (Postgres 'vector' accepts array-like)
+        try:
+            # Note: the python supabase client will convert the list to a JSON payload
+            rpc_resp = supabase.rpc("search_documents", {"query_embedding": query_vector, "k": RESULTS_K}).execute()
+        except Exception as e:
+            st.error(f"Error calling Supabase RPC: {e}")
+            st.stop()
 
-def format_sources(sources):
-    """Format sources for display"""
-    if not sources:
-        return "No sources found"
-    
-    html = ""
-    for i, source in enumerate(sources, 1):
-        html += f"""
-        <div class='source-box'>
-            <strong>Source {i}: {source.get('title', 'Unknown')}</strong><br>
-            <small>📍 {source.get('source', 'unknown').upper()} | 
-            Score: {source.get('score', 0):.2%}</small><br>
-            <br>{source.get('full_text', '')[:300]}...
-        </div>
-        """
-    return html
+        if rpc_resp.error:
+            st.error(f"Supabase error: {rpc_resp.error.message if hasattr(rpc_resp.error, 'message') else rpc_resp.error}")
+            st.stop()
 
-def get_answer(query: str):
-    """Get answer from SAGA assistant"""
-    if not st.session_state.system_ready:
-        return None
-    
-    assistant = SAGAAssistant(
-        rag_pipeline=st.session_state.rag,
-        llm_agent=st.session_state.agent
-    )
-    
-    response = assistant.answer(query, top_k=config.RAG_TOP_K)
-    return response
-
-# ============== Auto-Initialize System ==============
-if not st.session_state.initialized:
-    initialize_system()
-
-# ============== Main UI ==============
-
-# Header
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.markdown(f"<h1 class='main-title'>{config.TITLE}</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p class='subtitle'>{config.SUBTITLE}</p>", unsafe_allow_html=True)
-
-with col2:
-    # Show environment info
-    running_in_hf = os.getenv("SPACE_ID") is not None
-    llm_info = f"""
-    **System Status:**
-    - Provider: {config.LLM_PROVIDER}
-    - Model: {config.DEFAULT_MODEL}
-    - RAG: {'✅ Ready' if st.session_state.rag else '❌ Not loaded'}
-    - Env: {'🤗 HF Spaces' if running_in_hf else '💻 Local'}
-    """
-    st.info(llm_info)
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    
-    # Initialize system
-    if st.button("🚀 Initialize System"):
-        initialize_system()
-    
-    st.divider()
-    
-    # LLM Settings
-    st.subheader("🤖 LLM Settings")
-    provider = st.selectbox(
-        "LLM Provider",
-        ["ollama", "replicate", "huggingface"],
-        index=0
-    )
-    
-    if provider == "ollama":
-        model = st.selectbox("Model", list(config.OLLAMA_MODELS.keys()))
-    elif provider == "replicate":
-        model = st.selectbox("Model", list(config.REPLICATE_MODELS.keys()))
-    else:
-        model = st.text_input("HuggingFace Model ID", config.DEFAULT_MODEL)
-    
-    # RAG Settings
-    st.subheader("📚 RAG Settings")
-    top_k = st.slider("Top K Sources", 3, 10, config.RAG_TOP_K)
-    chunk_size = st.slider("Chunk Size", 256, 1024, config.RAG_CHUNK_SIZE, step=128)
-    
-    st.divider()
-    
-    # Dataset Management
-    st.subheader("📊 Dataset")
-    
-    if st.button("🔄 Rebuild Dataset"):
-        st.info("Dataset building would run in terminal:")
-        st.code("python tools/build_dataset.py")
-    
-    if st.button("🏗️ Build RAG Index"):
-        st.info("Index building would run in terminal:")
-        st.code("python tools/embeddings.py")
-    
-    # Help
-    st.divider()
-    st.subheader("❓ Help & Setup")
-    
-    help_topic = st.selectbox(
-        "Setup Guide",
-        ["Setup Ollama", "Setup Replicate", "Setup HuggingFace", "Deploy to HF Spaces", "FAQ"]
-    )
-    
-    if help_topic == "Setup Ollama":
-        st.markdown(config.HELP_MESSAGES["setup_ollama"])
-    elif help_topic == "Setup Replicate":
-        st.markdown(config.HELP_MESSAGES["setup_replicate"])
-    elif help_topic == "Setup HuggingFace":
-        st.markdown(config.HELP_MESSAGES["setup_huggingface"])
-    elif help_topic == "Deploy to HF Spaces":
-        st.markdown("""
-        ### Deploy to HuggingFace Spaces
-        
-        **Free multi-user hosting!**
-        
-        1. **Prepare Data**
-           - Create dataset repo on HF Hub
-           - Upload FAISS index & metadata files
-        
-        2. **Push Code**
-           - Push repo to GitHub
-           - HF Spaces auto-syncs
-        
-        3. **Add Secrets**
-           - `HF_API_TOKEN` - Your HF token
-           - `HF_DATASET_REPO` - Your dataset repo ID
-        
-        4. **Deploy!**
-           - Space auto-builds
-           - Your URL: `huggingface.co/spaces/YOUR-NAME/sap-chatbot`
-        
-        📚 [See full guide](./DEPLOYMENT_HF_SPACES.md)
-        """)
-    else:
-        st.markdown("""
-        ### FAQ
-        
-        **Q: Can I use this offline?**
-        A: Yes! Use Ollama for fully local operation.
-        
-        **Q: Is this free?**
-        A: Yes! All components are free and open-source.
-        
-        **Q: How do I add more SAP knowledge?**
-        A: Run `python tools/build_dataset.py` to scrape more sources.
-        
-        **Q: Can I deploy this?**
-        A: Yes! Deploy on HuggingFace Spaces or Streamlit Cloud for free!
-        
-        **Q: How many users can access it?**
-        A: Free tier supports ~5 concurrent users. Upgrade for more.
-        
-        **Q: How long does inference take?**
-        A: First request: 30-60s. Subsequent: 10-20s. Faster on paid tiers.
-        """)
-
-# Main content area
-if not st.session_state.system_ready:
-    st.warning("⚠️ System not initialized. Click 'Initialize System' in the sidebar.")
-    col1, col2, col3 = st.columns(3)
-    with col2:
-        if st.button("🚀 Initialize Now", use_container_width=True):
-            if initialize_system():
-                st.success("✅ System initialized!")
-                st.rerun()
-            else:
-                st.error("❌ Failed to initialize system")
-else:
-    # Welcome message
-    with st.expander("ℹ️ How to use", expanded=False):
-        st.markdown(config.WELCOME_MESSAGE)
-    
-    st.divider()
-    
-    # Chat interface
-    st.subheader("💬 Ask Me About SAP")
-    
-    # Display chat history
-    for message in st.session_state.messages:
-        if message['role'] == 'user':
-            with st.chat_message("user"):
-                st.write(message['content'])
+        rows = rpc_resp.data or []
+        if not rows:
+            st.info("No results found.")
         else:
-            with st.chat_message("assistant"):
-                st.write(message['content'])
-    
-    # Input
-    user_query = st.chat_input("Ask a question about SAP...")
-    
-    if user_query:
-        # Add user message
-        st.session_state.messages.append({
-            'role': 'user',
-            'content': user_query,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Display user message
-        with st.chat_message("user"):
-            st.write(user_query)
-        
-        # Get response
-        with st.chat_message("assistant"):
-            with st.spinner("Searching knowledge base and generating answer..."):
-                response = get_answer(user_query)
-                
-                if response:
-                    # Display answer
-                    st.write(response['answer'])
-                    
-                    # Display sources
-                    if response.get('sources'):
-                        with st.expander("📚 Sources Used"):
-                            st.markdown(
-                                format_sources(response['sources']),
-                                unsafe_allow_html=True
-                            )
-                    
-                    # Add to history
-                    st.session_state.messages.append({
-                        'role': 'assistant',
-                        'content': response['answer'],
-                        'sources': response.get('sources'),
-                        'timestamp': datetime.now().isoformat()
-                    })
-                    
-                    # Footer
-                    st.divider()
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.caption(f"🤖 Model: {response['model']}")
-                    with col2:
-                        st.caption(f"📊 Sources: {response['num_sources']}")
-                    with col3:
-                        st.caption(f"⏱️ {response['timestamp']}")
-                else:
-                    st.error("❌ Failed to generate response")
-
-# Footer
-st.divider()
-footer_col1, footer_col2, footer_col3 = st.columns(3)
-with footer_col1:
-    st.markdown("**📖 [GitHub](https://github.com/Akshay-S-PY/sap-chatboot)**")
-with footer_col2:
-    st.markdown("**🔗 [SAP Community](https://community.sap.com)**")
-with footer_col3:
-    st.markdown("**⭐ Made with ❤️ by Akshay**")
-        
-        # Combine title and content for search
-        text = f"{doc.get('title', '')} {doc.get('content', '')}".lower()
-        
-        # Exact phrase matches
-        if query in text:
-            score += 20
-            
-        # Individual word matches
-        query_words = query.split()
-        matches = sum(1 for word in query_words if word in text)
-        score += matches * 2
-        
-        # Title matches are more important
-        title = doc.get('title', '').lower()
-        if any(word in title for word in query_words):
-            score += 10
-            
-        if score > 0:
-            results.append((score, doc))
-    
-    # Sort by relevance
-    results.sort(key=lambda x: x[0], reverse=True)
-    return [doc for score, doc in results[:top_k]]
-
-def format_answer(results, query):
-    """Format the search results into a nice answer"""
-    if not results:
-        return "I couldn't find specific information about that topic in my knowledge base. Try asking about:\n\n- SAP Basis administration\n- System monitoring (SM50, SM66)\n- Transport Management (TMS)\n- User and security management\n- Background job processing"
-    
-    response = []
-    response.append("## 📚 Found Information\n")
-    
-    for i, doc in enumerate(results, 1):
-        title = doc.get('title', 'SAP Basis Article')
-        content = doc.get('content', '')
-        
-        # Extract relevant snippet
-        sentences = re.split(r'[.!?]+', content)
-        snippet = '. '.join(sentences[:3]) + '.' if sentences else content[:300] + "..."
-        
-        response.append(f"**{i}. {title}**")
-        response.append(f"{snippet}")
-        response.append(f"*Source: {doc.get('url', 'SAP Community')}*")
-        response.append("---")
-    
-    return "\n\n".join(response)
-
-# Load dataset
-dataset = load_dataset()
-
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Settings")
-    top_k = st.slider("Number of results", 3, 10, 5)
-    
-    st.header("💡 Sample Questions")
-    samples = [
-        "How to monitor work processes?",
-        "What is TMS in SAP?",
-        "How to check system logs?",
-        "User administration best practices",
-        "Background job monitoring"
-    ]
-    
-    for sample in samples:
-        if st.button(sample, use_container_width=True):
-            st.session_state.query = sample
-
-# Main interface
-if dataset:
-    query = st.text_input(
-        "💬 Ask your SAP Basis question:",
-        placeholder="e.g., How do I analyze work processes using SM50?",
-        value=st.session_state.get('query', '')
-    )
-    
-    if st.button("🔍 Search", type="primary") or query:
-        if query.strip():
-            with st.spinner("Searching knowledge base..."):
-                results = search_documents(query, dataset, top_k)
-                st.markdown(format_answer(results, query))
-else:
-    st.error("No dataset available. Please check the configuration.")
-
-# Footer
-st.markdown("---")
-st.caption("💡 This assistant uses publicly available SAP Community content. Always verify critical information with official SAP documentation.")
+            st.success(f"Found {len(rows)} results")
+            for r in rows:
+                st.markdown(f"**{r.get('title','(no title)')}** — chunk {r.get('chunk_id')}, similarity: {r.get('similarity'):.4f}")
+                st.write(r.get("content", "")[:1000])  # show first 1k chars
+                st.markdown("---")
