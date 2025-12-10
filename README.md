@@ -1,34 +1,57 @@
 # 🧩 SAP Intelligent Assistant
 
-A free, open-source **RAG (Retrieval-Augmented Generation)** system for answering SAP-related questions using local LLMs or free cloud models.
+A free, open-source **RAG (Retrieval-Augmented Generation)** system for answering SAP-related questions using cloud LLMs and vector databases.
 
 **Key Features:**
-- ✅ 100% Free & Open Source
+- ✅ 100% Free & Open Source (with paid options)
 - ✅ Multi-source SAP data (Community, GitHub, blogs)
-- ✅ Local LLM support (Ollama) - fully offline
-- ✅ Vector search with semantic understanding
+- ✅ **Production-ready**: Supabase + pgvector for vector search
+- ✅ HuggingFace Inference API for embeddings & generation
+- ✅ Automatic ingestion via GitHub Actions
 - ✅ Beautiful Streamlit UI
+- ✅ Multi-user cloud hosting on HuggingFace Spaces
 - ✅ Conversation history & source tracking
-- ✅ Easy to deploy on HuggingFace Spaces or Streamlit Cloud
 
 ---
 
-## 🌐 Deploy to HuggingFace Spaces (NEW!)
+## 🚀 Architecture
+
+```
+Documents → GitHub → GitHub Actions → Supabase (pgvector)
+                         ↓
+                     ingest.py
+                   (embeddings)
+                              ↓
+                         Users → HF Spaces
+                              ↓
+                          Streamlit App
+                         (HF Inference API)
+                              ↓
+                    Vector Search (Supabase RPC)
+                              ↓
+                        Answer Generation
+```
+
+---
+
+## 🌐 Deploy to HuggingFace Spaces
 
 **Share your chatbot with your entire team - for FREE!**
 
-No local setup needed for users. Just share a URL!
+### Quick Start (Production Setup)
 
-👉 **[See QUICKSTART_HF_SPACES.md for 30-minute setup](./QUICKSTART_HF_SPACES.md)**
+👉 **[SUPABASE_SETUP.md](./SUPABASE_SETUP.md)** ← Start here for cloud deployment
 
-Or follow the detailed guide: **[SETUP_SPACES.md](./SETUP_SPACES.md)**
+### Alternative: Local Setup (Offline)
+
+Or follow: **[QUICKSTART_HF_SPACES.md](./QUICKSTART_HF_SPACES.md)**
 
 **What you get:**
-- ✅ Public or private URL
+- ✅ Production database (Supabase pgvector)
+- ✅ Automatic ingestion (GitHub Actions)
 - ✅ Multi-user access (5+ concurrent)
-- ✅ Zero cost ($0/month)
+- ✅ Zero cost (free tier)
 - ✅ Auto-scaling infrastructure
-- ✅ No user setup required
 
 ---
 

@@ -24,6 +24,10 @@ replicate>=0.20.0  # Free tier: https://replicate.com
 numpy>=1.24.0
 pandas>=2.0.0
 
+# Database
+supabase>=2.0.0
+postgrest-py>=0.15.0
+
 # Utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0
