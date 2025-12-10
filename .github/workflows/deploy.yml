@@ -43,34 +43,60 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Prepare HF Space repo
+      - name: Deploy to Hugging Face Space
         env:
-          HF_USERNAME: ${{ secrets.HF_USERNAME }}
-          HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
-          HF_SPACE: Psytamaa/sap-chatbot
+          HF_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
         run: |
           set -e
+          
+          # Configure git globally first
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          SPACE_GIT="https://$HF_WRITE_TOKEN@huggingface.co/spaces/Psytamaa/sap-chatbot"
-          git clone --depth 1 "$SPACE_GIT" space || (mkdir space && git init space && cd space && git remote add origin "$SPACE_GIT" && cd ..)
-          cd space
-          git checkout -B main
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
+          
+          # Set git environment variables
           export GIT_AUTHOR_NAME="github-actions[bot]"
           export GIT_AUTHOR_EMAIL="github-actions[bot]@users.noreply.github.com"
           export GIT_COMMITTER_NAME="github-actions[bot]"
           export GIT_COMMITTER_EMAIL="github-actions[bot]@users.noreply.github.com"
-          cd ..
-          rsync -av --delete --exclude .git . space/
-          cd space
+          
+          # Clone or initialize the HF Space repo
+          SPACE_URL="https://oauth2:${HF_TOKEN}@huggingface.co/spaces/Psytamaa/sap-chatbot"
+          
+          if git clone --depth 1 "$SPACE_URL" hf_space 2>/dev/null; then
+            echo "✅ Cloned existing Space"
+          else
+            echo "📁 Creating new Space directory"
+            mkdir -p hf_space
+            cd hf_space
+            git init
+            git remote add origin "$SPACE_URL"
+            cd ..
+          fi
+          
+          # Configure git inside the cloned repo
+          cd hf_space
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
+          
+          # Ensure we're on main branch
+          git checkout -B main 2>/dev/null || git checkout main 2>/dev/null || true
+          cd ..
+          
+          # Sync files (exclude .git, space folder, and workflow files)
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude 'hf_space' \
+            --exclude '.github' \
+            . hf_space/
+          
+          # Commit and push
+          cd hf_space
           git add -A
-          GIT_AUTHOR_NAME="github-actions[bot]" \
-          GIT_AUTHOR_EMAIL="github-actions[bot]@users.noreply.github.com" \
-          GIT_COMMITTER_NAME="github-actions[bot]" \
-          GIT_COMMITTER_EMAIL="github-actions[bot]@users.noreply.github.com" \
-          git commit -m "Deploy Streamlit app (CI) [ci skip]" || echo "No changes to commit"
-          git push origin HEAD:main --force
+          
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to deploy"
+          else
+            git commit -m "Deploy from GitHub Actions $(date -u +%Y-%m-%d_%H:%M:%S)"
+            git push origin main --force
+            echo "✅ Successfully deployed to Hugging Face Space!"
+          fi
