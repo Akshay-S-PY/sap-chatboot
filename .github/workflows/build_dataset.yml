@@ -1,5 +1,5 @@
 # .github/workflows/build_dataset.yml
-name: Build SAP Dataset
+name: Build SAP Basis Dataset
 
 on:
   workflow_dispatch:
@@ -21,33 +21,28 @@ jobs:
           
       - name: 📦 Install dependencies
         run: |
-          pip install requests beautifulsoup4 huggingface-hub lxml
+          pip install requests beautifulsoup4 huggingface-hub
           
       - name: 🗃️ Build dataset
         run: |
           python tools/build_dataset.py
-          echo "Dataset file(s):"
-          ls -la data/sap_dataset.json || true
+          echo "Dataset size:"
+          ls -la data/sap_basis_dataset.json || echo "No dataset file"
           
-p = Path('data/sap_dataset.json')
       - name: 📊 Check dataset quality
         run: |
-          if [ -f "data/sap_dataset.json" ]; then
+          if [ -f "data/sap_basis_dataset.json" ]; then
             echo "Dataset info:"
-            python << 'EOF'
-import json
-from pathlib import Path
-
-p = Path('data/sap_dataset.json')
-print(f'File: {p} | size: {p.stat().st_size:,} bytes')
-with p.open('r', encoding='utf-8') as f:
-    data = json.load(f)
-print(f'Articles: {len(data)}')
-total_chars = sum(len(article.get('content', '')) for article in data)
-print(f'Total characters: {total_chars:,}')
-avg_length = total_chars / len(data) if data else 0
-print(f'Average article length: {avg_length:,.0f} characters')
-EOF
+            python -c "
+            import json
+            with open('data/sap_basis_dataset.json', 'r') as f:
+                data = json.load(f)
+            print(f'Articles: {len(data)}')
+            total_chars = sum(len(article.get('content', '')) for article in data)
+            print(f'Total characters: {total_chars:,}')
+            avg_length = total_chars / len(data) if data else 0
+            print(f'Average article length: {avg_length:,.0f} characters')
+            "
           else
             echo "❌ No dataset file created"
             exit 1
