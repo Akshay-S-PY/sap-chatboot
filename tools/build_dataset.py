@@ -216,6 +216,80 @@ class SAPDatasetBuilder:
         except Exception as e:
             print(f"  ⚠️  Medium scrape error: {e}")
 
+    # ============== StackOverflow (free, public API) ==============
+    def fetch_stackoverflow_answer(self, answer_id):
+        """Fetch accepted answer body via Stack Exchange API"""
+        try:
+            api = (
+                f"https://api.stackexchange.com/2.3/answers/{answer_id}"
+                "?order=desc&sort=activity&site=stackoverflow&filter=withbody"
+            )
+            resp = requests.get(api, headers=self.headers, timeout=10)
+            items = resp.json().get('items', [])
+            if items:
+                html_body = items[0].get('body', '')
+                text = BeautifulSoup(html_body, 'html.parser').get_text(" ", strip=True)
+                return re.sub(r'\s+', ' ', text)
+        except Exception as e:
+            print(f"    ⚠️  StackOverflow answer fetch error: {e}")
+        return ""
+
+    def scrape_stackoverflow(self):
+        """Scrape top StackOverflow SAP-tagged Q&A (free API, no key)"""
+        print("\n🔴 Scraping StackOverflow Q&A...")
+        tags = [
+            "sap",
+            "sapui5",
+            "sap-fiori",
+            "abap",
+            "sap-gateway",
+            "sap-cloud-platform",
+            "sap-btp",
+            "sap-hana",
+            "odata",
+        ]
+        for tag in tags:
+            try:
+                api_url = (
+                    "https://api.stackexchange.com/2.3/search/advanced"
+                    f"?order=desc&sort=votes&tagged={quote(tag)}&site=stackoverflow"
+                    "&pagesize=25&filter=withbody"
+                )
+                print(f"  🔍 Tag: {tag}")
+                resp = requests.get(api_url, headers=self.headers, timeout=10)
+                resp.raise_for_status()
+                questions = resp.json().get('items', [])
+                for q in questions:
+                    link = q.get('link', '')
+                    if not link or link in self.seen_urls:
+                        continue
+                    self.seen_urls.add(link)
+                    title = q.get('title', 'StackOverflow Question')
+                    question_body = BeautifulSoup(q.get('body', ''), 'html.parser').get_text(" ", strip=True)
+                    question_body = re.sub(r'\s+', ' ', question_body)
+                    accepted_id = q.get('accepted_answer_id')
+                    accepted_body = self.fetch_stackoverflow_answer(accepted_id) if accepted_id else ''
+                    content_parts = [f"Question: {title}", question_body]
+                    if accepted_body:
+                        content_parts.append("Accepted Answer:")
+                        content_parts.append(accepted_body)
+                    content = "\n\n".join([p for p in content_parts if p])
+                    if len(content) > 300:
+                        self.add_to_dataset({
+                            'url': link,
+                            'title': title,
+                            'content': content[:18000],
+                            'source': 'stackoverflow',
+                            'tags': q.get('tags', []),
+                            'score': q.get('score', 0),
+                            'is_answered': q.get('is_answered', False),
+                        })
+                        print(f"    ✅ Added Q&A: {title[:60]}")
+                    time.sleep(0.3)
+                time.sleep(1.2)
+            except Exception as e:
+                print(f"  ⚠️  StackOverflow error for tag '{tag}': {e}")
+
     # ============== SAP Developers Tutorials ==============
     def scrape_sap_developers_tutorials(self):
         """Scrape tutorial listings from developers.sap.com/tutorials"""
@@ -326,6 +400,7 @@ class SAPDatasetBuilder:
         self.scrape_github_sap_repos()
         self.scrape_devto_articles()
         self.scrape_medium_tag()
+        self.scrape_stackoverflow()
         self.scrape_sap_developers_tutorials()
         
         # Save dataset

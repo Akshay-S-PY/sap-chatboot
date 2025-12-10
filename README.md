@@ -4,7 +4,7 @@ A free, open-source **RAG (Retrieval-Augmented Generation)** system for answerin
 
 **Key Features:**
 - ✅ 100% Free & Open Source (with paid options)
-- ✅ Multi-source SAP data (Community, GitHub, blogs)
+- ✅ Multi-source SAP data (Community, GitHub, StackOverflow, blogs)
 - ✅ **Production-ready**: Supabase + pgvector for vector search
 - ✅ HuggingFace Inference API for embeddings & generation
 - ✅ Automatic ingestion via GitHub Actions
@@ -238,7 +238,7 @@ RAG_CHUNK_OVERLAP=100
 ## 🔍 How It Works
 
 1. **Data Collection** (`build_dataset.py`)
-   - Scrapes SAP Community, GitHub, dev.to
+    - Scrapes SAP Community, StackOverflow, GitHub, dev.to, Medium, SAP Developers tutorials
    - Saves structured JSON
 
 2. **Embeddings & Indexing** (`embeddings.py`)
