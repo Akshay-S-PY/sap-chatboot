@@ -31,3 +31,8 @@ pydantic>=2.0.0
 # Optional: For better performance
 # torch>=2.0.0  # Uncomment if you have GPU
 # opencv-python>=4.8.0  # For image processing if needed
+
+streamlit
+huggingface-hub
+supabase
+numpy
