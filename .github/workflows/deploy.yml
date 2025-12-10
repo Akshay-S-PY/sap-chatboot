@@ -60,6 +60,7 @@ jobs:
           export GIT_COMMITTER_EMAIL="github-actions[bot]@users.noreply.github.com"
           
           # Clone or initialize the HF Space repo
+          # CORRECT URL: sap-chatbot (not sap-chatboot)
           SPACE_URL="https://oauth2:${HF_TOKEN}@huggingface.co/spaces/Psytamaa/sap-chatbot"
           
           if git clone --depth 1 "$SPACE_URL" hf_space 2>/dev/null; then
@@ -82,11 +83,12 @@ jobs:
           git checkout -B main 2>/dev/null || git checkout main 2>/dev/null || true
           cd ..
           
-          # Sync files (exclude .git, space folder, and workflow files)
+          # Sync files (exclude .git, hf_space folder, and workflow files)
           rsync -av --delete \
             --exclude '.git' \
             --exclude 'hf_space' \
             --exclude '.github' \
+            --exclude 'space' \
             . hf_space/
           
           # Commit and push
