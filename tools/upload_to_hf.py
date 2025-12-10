@@ -9,13 +9,16 @@ def upload_dataset():
     """Upload dataset to Hugging Face using GitHub secrets"""
     
     # Get credentials from GitHub secrets
-    hf_token = os.getenv("HF_TOKEN")
-    hf_repo = os.getenv("HF_DATASET_REPO")
+    hf_token = os.getenv("HF_WRITE_TOKEN")
+    hf_username = os.getenv("HF_USERNAME")
     
     if not hf_token:
-        raise ValueError("❌ HF_TOKEN secret not found in GitHub")
-    if not hf_repo:
-        raise ValueError("❌ HF_DATASET_REPO secret not found in GitHub")
+        raise ValueError("❌ HF_WRITE_TOKEN secret not found in GitHub")
+    if not hf_username:
+        raise ValueError("❌ HF_USERNAME secret not found in GitHub")
+    
+    # Build repo ID from username
+    hf_repo = f"{hf_username}/sap-dataset"
     
     print(f"📤 Uploading to Hugging Face: {hf_repo}")
     
