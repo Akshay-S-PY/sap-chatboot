@@ -4,6 +4,10 @@ import glob
 from supabase import create_client
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+# load local .env for manual runs (GH Actions will use secrets)
+load_dotenv()
 
 # config from env
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -12,7 +16,9 @@ EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 DOCS_PATH = os.environ.get("DOCS_PATH", "data/docs")  # path in repo
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-    raise SystemExit("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets before running.")
+    raise SystemExit(
+        "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in env (local .env or GitHub Secrets) before running."
+    )
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 model = SentenceTransformer(EMBEDDING_MODEL)

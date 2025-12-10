@@ -30,11 +30,11 @@ def upload_dataset():
         print(f"⚠️  Note: {e}")
     
     # Upload dataset file
-    dataset_path = "data/sap_basis_dataset.json"
+    dataset_path = "data/sap_dataset.json"
     if Path(dataset_path).exists():
         api.upload_file(
             path_or_fileobj=dataset_path,
-            path_in_repo="sap_basis_dataset.json",
+            path_in_repo="sap_dataset.json",
             repo_id=hf_repo,
             repo_type="dataset",
             token=hf_token
@@ -43,11 +43,11 @@ def upload_dataset():
         
         # Also upload a dataset card
         dataset_card = {
-            "dataset_name": "SAP Basis Knowledge Base",
-            "description": "A collection of SAP Basis articles and documentation from SAP Community",
+            "dataset_name": "SAP Knowledge Base",
+            "description": "Multi-source SAP dataset (Community, StackOverflow, GitHub, Dev.to, Medium, SAP Developers tutorials)",
             "language": "en",
             "task_categories": ["question-answering", "text-generation"],
-            "tags": ["sap", "basis", "administration", "erp"]
+            "tags": ["sap", "basis", "abap", "hana", "btp", "fiori", "ui5", "qa"]
         }
         
         with open("data/dataset_card.json", "w") as f:

@@ -21,21 +21,21 @@ jobs:
           
       - name: 📦 Install dependencies
         run: |
-          pip install requests beautifulsoup4 huggingface-hub
+          pip install requests beautifulsoup4 huggingface-hub lxml
           
       - name: 🗃️ Build dataset
         run: |
           python tools/build_dataset.py
           echo "Dataset size:"
-          ls -la data/sap_basis_dataset.json || echo "No dataset file"
+          ls -la data/sap_dataset.json || echo "No dataset file"
           
       - name: 📊 Check dataset quality
         run: |
-          if [ -f "data/sap_basis_dataset.json" ]; then
+          if [ -f "data/sap_dataset.json" ]; then
             echo "Dataset info:"
             python -c "
             import json
-            with open('data/sap_basis_dataset.json', 'r') as f:
+            with open('data/sap_dataset.json', 'r') as f:
                 data = json.load(f)
             print(f'Articles: {len(data)}')
             total_chars = sum(len(article.get('content', '')) for article in data)
