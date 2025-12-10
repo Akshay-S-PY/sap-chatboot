@@ -1,3 +1,33 @@
+# Web Framework
 streamlit>=1.28.0
+
+# Hugging Face Integration
 huggingface-hub>=0.20.0
+transformers>=4.35.0
+
+# Web Scraping
 requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# LLM & Embeddings (Free Options)
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.0
+langchain>=0.1.0
+langchain-community>=0.0.10
+
+# Free LLM Options
+ollama>=0.1.0  # Local LLM support (https://ollama.ai)
+replicate>=0.20.0  # Free tier: https://replicate.com
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Optional: For better performance
+# torch>=2.0.0  # Uncomment if you have GPU
+# opencv-python>=4.8.0  # For image processing if needed

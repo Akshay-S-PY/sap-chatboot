@@ -1,23 +1,324 @@
-# SAP Basis Chatbot (Free RAG)
+# 🧩 SAP Intelligent Assistant
 
-A Streamlit app that answers beginner SAP Basis questions using short, cited passages from public SAP Community blogs (and a few official overviews). No paid APIs or servers.
+A free, open-source **RAG (Retrieval-Augmented Generation)** system for answering SAP-related questions using local LLMs or free cloud models.
 
-## Live App
-- Deploy on Streamlit Community Cloud: point to `app.py`
+**Key Features:**
+- ✅ 100% Free & Open Source
+- ✅ Multi-source SAP data (Community, GitHub, blogs)
+- ✅ Local LLM support (Ollama) - fully offline
+- ✅ Vector search with semantic understanding
+- ✅ Beautiful Streamlit UI
+- ✅ Conversation history & source tracking
+- ✅ Easy to deploy on HuggingFace Spaces or Streamlit Cloud
 
-## How it works
-- **GitHub Actions** (daily or on demand) discovers Basis blog links, fetches rendered pages, extracts text, chunks, embeds (MiniLM), builds a FAISS index.
-- **Artifacts** are stored in the repo (if small) or on **Hugging Face Hub** (if large).
-- The **Streamlit app** loads the latest index (HF first if configured), retrieves top-k passages and shows a concise answer with citations.
+---
 
-## Run (Streamlit Cloud)
-- No setup—Cloud installs `requirements.txt` and runs `app.py`.
-- Optional secret: `HF_DATASET_REPO = yourname/sap-basis-rag` (if artifacts live on HF).
+## 🌐 Deploy to HuggingFace Spaces (NEW!)
 
-## Manual run (optional)
+**Share your chatbot with your entire team - for FREE!**
+
+No local setup needed for users. Just share a URL!
+
+👉 **[See QUICKSTART_HF_SPACES.md for 30-minute setup](./QUICKSTART_HF_SPACES.md)**
+
+Or follow the detailed guide: **[SETUP_SPACES.md](./SETUP_SPACES.md)**
+
+**What you get:**
+- ✅ Public or private URL
+- ✅ Multi-user access (5+ concurrent)
+- ✅ Zero cost ($0/month)
+- ✅ Auto-scaling infrastructure
+- ✅ No user setup required
+
+---
+
+### Option 1: Local (Offline) Setup with Ollama
+
+**1. Install Ollama**
 ```bash
-# Not required if you only use CI + Streamlit Cloud
-python -m venv .venv && source .venv/bin/activate
+# Download from https://ollama.ai
+# Then start the server
+ollama serve
+```
+
+**2. Pull an LLM model**
+```bash
+# Fast option (3B)
+ollama pull neural-chat
+
+# Or balanced (7B)
+ollama pull mistral
+
+# Or best quality (8x7B)
+ollama pull dolphin-mixtral
+```
+
+**3. Setup SAP Assistant**
+```bash
+# Clone/setup the project
+cd /Users/akshay/sap-chatboot
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
-export HF_DATASET_REPO=yourname/sap-basis-rag  # if using HF
+
+# Copy environment file
+cp .env.example .env
+
+# Build dataset from web
+python tools/build_dataset.py
+
+# Build vector index
+python tools/embeddings.py
+
+# Run the app
 streamlit run app.py
+```
+
+Open http://localhost:8501 in your browser!
+
+### Option 2: Cloud Setup (Replicate Free Tier)
+
+**1. Get API Token**
+- Sign up free at https://replicate.com
+- Get your API token
+
+**2. Setup**
+```bash
+cd sap-chatboot
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+export REPLICATE_API_TOKEN="your_token_here"
+python tools/build_dataset.py
+python tools/embeddings.py
+
+export LLM_PROVIDER=replicate
+export LLM_MODEL=meta/llama-2-7b-chat
+streamlit run app.py
+```
+
+### Option 3: HuggingFace Free Tier
+
+**1. Get API Token**
+- Create account at https://huggingface.co
+- Get token from https://huggingface.co/settings/tokens
+
+**2. Setup**
+```bash
+cd sap-chatboot
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+export HF_API_TOKEN="your_token_here"
+python tools/build_dataset.py
+python tools/embeddings.py
+
+export LLM_PROVIDER=huggingface
+export LLM_MODEL="mistralai/Mistral-7B-Instruct-v0.1"
+streamlit run app.py
+```
+
+## 📊 Architecture
+
+```
+Web Scraper (build_dataset.py)
+├── SAP Community
+├── GitHub Repos
+├── Dev.to
+└── Tech Blogs
+        ↓
+    SAP Dataset (sap_dataset.json)
+        ↓
+RAG Pipeline (embeddings.py)
+├── Chunk Management
+├── Embeddings (Sentence Transformers)
+└── FAISS Vector Index
+        ↓
+    Vector Index (rag_index.faiss)
+        ↓
+LLM Agent (agent.py)
+├── Ollama (Local)
+├── Replicate (Free)
+└── HuggingFace (Free)
+        ↓
+    Streamlit UI (app.py)
+    ├── Chat Interface
+    └── Source Attribution
+```
+
+## 📁 Project Structure
+
+```
+sap-chatboot/
+├── app.py                      # Main Streamlit UI
+├── config.py                   # Configuration & prompts
+├── requirements.txt            # Python dependencies
+├── .env.example                # Environment template
+├── README.md                   # This file
+│
+├── tools/
+│   ├── build_dataset.py        # Web scraper for SAP data
+│   ├── embeddings.py           # RAG pipeline & vector store
+│   └── agent.py                # LLM agent with multiple providers
+│
+└── data/
+    ├── sap_dataset.json        # Scraped SAP knowledge base
+    ├── rag_index.faiss         # Vector index
+    └── rag_metadata.pkl        # Chunk metadata
+```
+
+## 🔧 Configuration
+
+Create `.env` file (copy from `.env.example`):
+
+```env
+# LLM Provider: ollama, replicate, or huggingface
+LLM_PROVIDER=ollama
+LLM_MODEL=mistral
+
+# API Tokens (if using cloud providers)
+REPLICATE_API_TOKEN=your_token
+HF_API_TOKEN=your_token
+
+# Embeddings model
+EMBEDDINGS_MODEL=all-MiniLM-L6-v2
+
+# RAG settings
+RAG_TOP_K=5
+RAG_CHUNK_SIZE=512
+RAG_CHUNK_OVERLAP=100
+```
+
+## 📚 Available LLMs
+
+### Ollama (Local - Free)
+| Model | Size | Speed | Quality |
+|-------|------|-------|---------|
+| Neural Chat | 3B | ⚡⚡⚡ | Good |
+| Mistral | 7B | ⚡⚡ | Excellent |
+| Dolphin Mixtral | 8x7B | ⚡ | Best |
+
+### Replicate (Free Tier)
+- Llama 2 7B
+- Mistral 7B
+- And more open models
+
+### HuggingFace (Free Tier)
+- Any HuggingFace text-generation model
+
+## 🔍 How It Works
+
+1. **Data Collection** (`build_dataset.py`)
+   - Scrapes SAP Community, GitHub, dev.to
+   - Saves structured JSON
+
+2. **Embeddings & Indexing** (`embeddings.py`)
+   - Splits documents into chunks
+   - Generates embeddings (Sentence Transformers)
+   - Builds FAISS vector index
+
+3. **Query & Answer** (`agent.py`)
+   - User asks question
+   - RAG retrieves relevant documents
+   - LLM generates answer with context
+   - Sources attributed
+
+## 💡 Supported Topics
+
+✅ SAP Basis Administration
+✅ SAP ABAP Development
+✅ SAP HANA
+✅ SAP Fiori & UI5
+✅ SAP Security & Authorization
+✅ SAP Configuration
+✅ SAP Performance Tuning
+✅ And more!
+
+## 🚀 Deployment
+
+### Deploy on Streamlit Cloud (Free)
+
+1. Push code to GitHub
+2. Go to https://share.streamlit.io/
+3. Select your repository
+4. Add environment secrets
+5. Deploy!
+
+### Deploy on Your Server
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py --server.port 8501
+```
+
+## 🛠️ Advanced Usage
+
+### Programmatic Access
+
+```python
+from tools.embeddings import load_rag_index
+from tools.agent import SAPAgent, SAGAAssistant
+
+rag = load_rag_index()
+agent = SAPAgent(llm_provider="ollama", model="mistral")
+assistant = SAGAAssistant(rag_pipeline=rag, llm_agent=agent)
+
+response = assistant.answer("How to backup SAP database?")
+print(response['answer'])
+print(response['sources'])
+```
+
+## ⚠️ Important Notes
+
+- **First Run**: Building dataset takes 5-10 minutes
+- **Storage**: Dataset ~100MB-500MB depending on sources
+- **Internet**: Only needed for initial scraping
+- **Local Mode**: Works 100% offline with Ollama
+- **Rate Limits**: Web scraper is respectful
+
+## 📊 Performance Tips
+
+| Goal | Setting |
+|------|---------|
+| **Fastest** | neural-chat + MiniLM |
+| **Best Quality** | dolphin-mixtral + mpnet |
+| **Memory Efficient** | MiniLM + small model |
+| **Cloud Friendly** | Replicate or HuggingFace |
+
+## ❓ FAQ
+
+**Q: Is this really free?**
+A: Yes! All components are free and open-source.
+
+**Q: Can I use offline?**
+A: Yes! Use Ollama for completely offline operation.
+
+**Q: How accurate?**
+A: RAG provides sources so you can verify.
+
+**Q: Can I add custom data?**
+A: Yes! Edit `build_dataset.py` to add sources.
+
+**Q: Privacy?**
+A: Local mode: All on your machine.
+
+## 🔗 Resources
+
+- **Ollama**: https://ollama.ai
+- **Replicate**: https://replicate.com
+- **HuggingFace**: https://huggingface.co
+- **SAP Community**: https://community.sap.com
+
+---
+
+**Made with ❤️ for the SAP Community**
+
+**Star ⭐ if you find this useful!**

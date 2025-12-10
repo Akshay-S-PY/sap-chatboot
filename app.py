@@ -1,53 +1,362 @@
 # app.py
+"""
+SAP Intelligent Assistant - Streamlit UI
+Free RAG-based Q&A system with local/cloud LLM support
+"""
+
 import streamlit as st
 import json
-from huggingface_hub import hf_hub_download
 import os
-import re
+from pathlib import Path
+from datetime import datetime
 
-st.set_page_config(
-    page_title="SAP Basis Chatbot",
-    page_icon="🧩",
-    layout="wide"
-)
+# Local imports
+from tools.embeddings import RAGPipeline, load_rag_index
+from tools.agent import SAPAgent, SAGAAssistant
+import config
 
-st.title("🧩 SAP Basis Assistant")
-st.markdown("Ask questions about SAP Basis administration, monitoring, and best practices.")
+# ============== Page Configuration ==============
+st.set_page_config(**config.STREAMLIT_PAGE_CONFIG)
 
-# Configuration - using your GitHub secrets
-HF_REPO = os.getenv("HF_DATASET_REPO", "your-username/sap-basis-dataset")  # Will be set in Streamlit Cloud
+# ============== Custom CSS ==============
+st.markdown("""
+<style>
+    .main-title { font-size: 2.5em; color: #1f77b4; margin-bottom: 0.3em; }
+    .subtitle { font-size: 1.2em; color: #666; margin-bottom: 2em; }
+    .source-box { 
+        background-color: #f0f2f6; 
+        padding: 1em; 
+        border-radius: 0.5em; 
+        margin: 0.5em 0;
+        border-left: 4px solid #1f77b4;
+    }
+    .success-box { background-color: #d4edda; padding: 1em; border-radius: 0.5em; }
+    .error-box { background-color: #f8d7da; padding: 1em; border-radius: 0.5em; }
+    .warning-box { background-color: #fff3cd; padding: 1em; border-radius: 0.5em; }
+</style>
+""", unsafe_allow_html=True)
+
+# ============== Session State Initialization ==============
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = False
+    st.session_state.rag = None
+    st.session_state.agent = None
+    st.session_state.messages = []
+    st.session_state.system_ready = False
+
+# ============== Helper Functions ==============
+# ============== Helper Functions ==============
+@st.cache_resource
+def initialize_rag():
+    """Load RAG pipeline - from HF Hub if in Spaces, else local"""
+    try:
+        # Check if running in HF Spaces
+        hf_dataset_repo = os.getenv("HF_DATASET_REPO")
+        running_in_hf_spaces = os.getenv("SPACE_ID") is not None
+        
+        if running_in_hf_spaces and hf_dataset_repo:
+            st.info("📚 Loading from HuggingFace Hub...")
+            try:
+                rag = RAGPipeline()
+                rag.load_from_hf_hub(hf_dataset_repo)
+                st.success("✅ Vector search ready!")
+                return rag
+            except Exception as e:
+                st.warning(f"⚠️ Could not load from HF Hub: {e}")
+                st.info("Attempting local load...")
+        
+        # Fallback to local files
+        if Path(config.INDEX_PATH).exists():
+            st.info("📚 Loading vector search index...")
+            rag = load_rag_index()
+            st.success("✅ Vector search ready!")
+            return rag
+        else:
+            st.warning("⚠️ RAG index not found. Please run the dataset builder first.")
+            return None
+    except Exception as e:
+        st.error(f"❌ Error loading RAG: {e}")
+        return None
 
 @st.cache_resource
-def load_dataset():
-    """Load dataset from Hugging Face"""
+def initialize_agent():
+    """Initialize LLM Agent"""
     try:
-        st.info("📥 Loading SAP Basis knowledge base...")
-        dataset_path = hf_hub_download(
-            repo_id=HF_REPO,
-            filename="sap_basis_dataset.json",
-            token=os.getenv("HF_TOKEN")  # Optional: if dataset is private
+        agent = SAPAgent(
+            llm_provider=config.LLM_PROVIDER,
+            model=config.DEFAULT_MODEL
         )
-        
-        with open(dataset_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        st.success(f"✅ Loaded {len(data)} SAP Basis documents")
-        return data
-        
+        return agent
     except Exception as e:
-        st.error(f"❌ Failed to load dataset: {e}")
-        st.info("Please make sure:")
-        st.info("1. HF_DATASET_REPO is set in Streamlit secrets")
-        st.info("2. The dataset exists at the specified repository")
-        return []
+        st.error(f"❌ Error initializing agent: {e}")
+        return None
 
-def search_documents(query, documents, top_k=5):
-    """Simple but effective search"""
-    query = query.lower().strip()
-    results = []
+def initialize_system():
+    """Initialize the entire system"""
+    if st.session_state.initialized:
+        return
     
-    for doc in documents:
-        score = 0
+    with st.spinner("Initializing SAP Assistant..."):
+        st.session_state.rag = initialize_rag()
+        st.session_state.agent = initialize_agent()
+        st.session_state.system_ready = (
+            st.session_state.rag is not None and 
+            st.session_state.agent is not None
+        )
+        st.session_state.initialized = True
+    
+    return st.session_state.system_ready
+
+def format_sources(sources):
+    """Format sources for display"""
+    if not sources:
+        return "No sources found"
+    
+    html = ""
+    for i, source in enumerate(sources, 1):
+        html += f"""
+        <div class='source-box'>
+            <strong>Source {i}: {source.get('title', 'Unknown')}</strong><br>
+            <small>📍 {source.get('source', 'unknown').upper()} | 
+            Score: {source.get('score', 0):.2%}</small><br>
+            <br>{source.get('full_text', '')[:300]}...
+        </div>
+        """
+    return html
+
+def get_answer(query: str):
+    """Get answer from SAGA assistant"""
+    if not st.session_state.system_ready:
+        return None
+    
+    assistant = SAGAAssistant(
+        rag_pipeline=st.session_state.rag,
+        llm_agent=st.session_state.agent
+    )
+    
+    response = assistant.answer(query, top_k=config.RAG_TOP_K)
+    return response
+
+# ============== Auto-Initialize System ==============
+if not st.session_state.initialized:
+    initialize_system()
+
+# ============== Main UI ==============
+
+# Header
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.markdown(f"<h1 class='main-title'>{config.TITLE}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p class='subtitle'>{config.SUBTITLE}</p>", unsafe_allow_html=True)
+
+with col2:
+    # Show environment info
+    running_in_hf = os.getenv("SPACE_ID") is not None
+    llm_info = f"""
+    **System Status:**
+    - Provider: {config.LLM_PROVIDER}
+    - Model: {config.DEFAULT_MODEL}
+    - RAG: {'✅ Ready' if st.session_state.rag else '❌ Not loaded'}
+    - Env: {'🤗 HF Spaces' if running_in_hf else '💻 Local'}
+    """
+    st.info(llm_info)
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    
+    # Initialize system
+    if st.button("🚀 Initialize System"):
+        initialize_system()
+    
+    st.divider()
+    
+    # LLM Settings
+    st.subheader("🤖 LLM Settings")
+    provider = st.selectbox(
+        "LLM Provider",
+        ["ollama", "replicate", "huggingface"],
+        index=0
+    )
+    
+    if provider == "ollama":
+        model = st.selectbox("Model", list(config.OLLAMA_MODELS.keys()))
+    elif provider == "replicate":
+        model = st.selectbox("Model", list(config.REPLICATE_MODELS.keys()))
+    else:
+        model = st.text_input("HuggingFace Model ID", config.DEFAULT_MODEL)
+    
+    # RAG Settings
+    st.subheader("📚 RAG Settings")
+    top_k = st.slider("Top K Sources", 3, 10, config.RAG_TOP_K)
+    chunk_size = st.slider("Chunk Size", 256, 1024, config.RAG_CHUNK_SIZE, step=128)
+    
+    st.divider()
+    
+    # Dataset Management
+    st.subheader("📊 Dataset")
+    
+    if st.button("🔄 Rebuild Dataset"):
+        st.info("Dataset building would run in terminal:")
+        st.code("python tools/build_dataset.py")
+    
+    if st.button("🏗️ Build RAG Index"):
+        st.info("Index building would run in terminal:")
+        st.code("python tools/embeddings.py")
+    
+    # Help
+    st.divider()
+    st.subheader("❓ Help & Setup")
+    
+    help_topic = st.selectbox(
+        "Setup Guide",
+        ["Setup Ollama", "Setup Replicate", "Setup HuggingFace", "Deploy to HF Spaces", "FAQ"]
+    )
+    
+    if help_topic == "Setup Ollama":
+        st.markdown(config.HELP_MESSAGES["setup_ollama"])
+    elif help_topic == "Setup Replicate":
+        st.markdown(config.HELP_MESSAGES["setup_replicate"])
+    elif help_topic == "Setup HuggingFace":
+        st.markdown(config.HELP_MESSAGES["setup_huggingface"])
+    elif help_topic == "Deploy to HF Spaces":
+        st.markdown("""
+        ### Deploy to HuggingFace Spaces
+        
+        **Free multi-user hosting!**
+        
+        1. **Prepare Data**
+           - Create dataset repo on HF Hub
+           - Upload FAISS index & metadata files
+        
+        2. **Push Code**
+           - Push repo to GitHub
+           - HF Spaces auto-syncs
+        
+        3. **Add Secrets**
+           - `HF_API_TOKEN` - Your HF token
+           - `HF_DATASET_REPO` - Your dataset repo ID
+        
+        4. **Deploy!**
+           - Space auto-builds
+           - Your URL: `huggingface.co/spaces/YOUR-NAME/sap-chatbot`
+        
+        📚 [See full guide](./DEPLOYMENT_HF_SPACES.md)
+        """)
+    else:
+        st.markdown("""
+        ### FAQ
+        
+        **Q: Can I use this offline?**
+        A: Yes! Use Ollama for fully local operation.
+        
+        **Q: Is this free?**
+        A: Yes! All components are free and open-source.
+        
+        **Q: How do I add more SAP knowledge?**
+        A: Run `python tools/build_dataset.py` to scrape more sources.
+        
+        **Q: Can I deploy this?**
+        A: Yes! Deploy on HuggingFace Spaces or Streamlit Cloud for free!
+        
+        **Q: How many users can access it?**
+        A: Free tier supports ~5 concurrent users. Upgrade for more.
+        
+        **Q: How long does inference take?**
+        A: First request: 30-60s. Subsequent: 10-20s. Faster on paid tiers.
+        """)
+
+# Main content area
+if not st.session_state.system_ready:
+    st.warning("⚠️ System not initialized. Click 'Initialize System' in the sidebar.")
+    col1, col2, col3 = st.columns(3)
+    with col2:
+        if st.button("🚀 Initialize Now", use_container_width=True):
+            if initialize_system():
+                st.success("✅ System initialized!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to initialize system")
+else:
+    # Welcome message
+    with st.expander("ℹ️ How to use", expanded=False):
+        st.markdown(config.WELCOME_MESSAGE)
+    
+    st.divider()
+    
+    # Chat interface
+    st.subheader("💬 Ask Me About SAP")
+    
+    # Display chat history
+    for message in st.session_state.messages:
+        if message['role'] == 'user':
+            with st.chat_message("user"):
+                st.write(message['content'])
+        else:
+            with st.chat_message("assistant"):
+                st.write(message['content'])
+    
+    # Input
+    user_query = st.chat_input("Ask a question about SAP...")
+    
+    if user_query:
+        # Add user message
+        st.session_state.messages.append({
+            'role': 'user',
+            'content': user_query,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Display user message
+        with st.chat_message("user"):
+            st.write(user_query)
+        
+        # Get response
+        with st.chat_message("assistant"):
+            with st.spinner("Searching knowledge base and generating answer..."):
+                response = get_answer(user_query)
+                
+                if response:
+                    # Display answer
+                    st.write(response['answer'])
+                    
+                    # Display sources
+                    if response.get('sources'):
+                        with st.expander("📚 Sources Used"):
+                            st.markdown(
+                                format_sources(response['sources']),
+                                unsafe_allow_html=True
+                            )
+                    
+                    # Add to history
+                    st.session_state.messages.append({
+                        'role': 'assistant',
+                        'content': response['answer'],
+                        'sources': response.get('sources'),
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    
+                    # Footer
+                    st.divider()
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.caption(f"🤖 Model: {response['model']}")
+                    with col2:
+                        st.caption(f"📊 Sources: {response['num_sources']}")
+                    with col3:
+                        st.caption(f"⏱️ {response['timestamp']}")
+                else:
+                    st.error("❌ Failed to generate response")
+
+# Footer
+st.divider()
+footer_col1, footer_col2, footer_col3 = st.columns(3)
+with footer_col1:
+    st.markdown("**📖 [GitHub](https://github.com/Akshay-S-PY/sap-chatboot)**")
+with footer_col2:
+    st.markdown("**🔗 [SAP Community](https://community.sap.com)**")
+with footer_col3:
+    st.markdown("**⭐ Made with ❤️ by Akshay**")
         
         # Combine title and content for search
         text = f"{doc.get('title', '')} {doc.get('content', '')}".lower()

@@ -1,239 +1,205 @@
 # tools/build_dataset.py
+"""
+Enhanced SAP Dataset Builder
+Scrapes from multiple free sources:
+- SAP Community blogs
+- GitHub SAP repositories
+- SAP official documentation
+- Dev.to & tech blogs
+"""
+
 import requests
 from bs4 import BeautifulSoup
 import json
 import time
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 import re
+from datetime import datetime
+import hashlib
 
-def setup_directories():
-    """Create necessary directories"""
-    Path("data").mkdir(exist_ok=True)
-
-def discover_article_urls():
-    """Discover actual article URLs from SAP Community"""
-    print("🔍 Discovering SAP Basis article URLs...")
+class SAPDatasetBuilder:
+    def __init__(self):
+        self.dataset = []
+        self.seen_urls = set()
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
     
-    # More targeted search URLs that should return actual articles
-    search_urls = [
-        "https://community.sap.com/t5/basis-blogs/bd-p/basis_blogs",
-        "https://community.sap.com/search/?ct=blog&q=SAP+Basis+administration",
-        "https://community.sap.com/search/?ct=blog&q=transport+management+system",
-        "https://community.sap.com/search/?ct=blog&q=work+process+monitoring",
-        "https://community.sap.com/search/?ct=blog&q=SM50+SM66",
-        "https://community.sap.com/search/?ct=blog&q=TMS+STMS",
-        "https://community.sap.com/search/?ct=blog&q=background+jobs",
-        "https://community.sap.com/search/?ct=blog&q=system+logs+SM21",
-    ]
+    def setup_directories(self):
+        """Create necessary directories"""
+        Path("data").mkdir(exist_ok=True)
+        Path("data/raw").mkdir(exist_ok=True)
     
-    all_urls = set()
+    # ============== SAP Community Source ==============
+    def scrape_sap_community(self):
+        """Scrape from SAP Community blogs"""
+        print("\n🔵 Scraping SAP Community blogs...")
+        
+        search_queries = [
+            "SAP Basis",
+            "SAP ABAP",
+            "SAP HANA",
+            "SAP Fiori",
+            "SAP Configuration",
+            "SAP Security",
+            "SAP Performance",
+            "SAP Transport",
+            "SAP Authorization",
+            "SAP BTP",
+        ]
+        
+        for query in search_queries:
+            try:
+                search_url = f"https://community.sap.com/search/?q={quote(query)}&ct=blog"
+                print(f"  🔍 Searching: {query}")
+                
+                response = requests.get(search_url, headers=self.headers, timeout=10)
+                soup = BeautifulSoup(response.content, 'html.parser')
+                
+                # Find article links
+                for link in soup.find_all('a', href=re.compile(r'/ba-p/\d+')):
+                    href = link.get('href', '')
+                    if '/ba-p/' in href:
+                        full_url = urljoin('https://community.sap.com', href)
+                        if full_url not in self.seen_urls:
+                            self.seen_urls.add(full_url)
+                            self.scrape_article(full_url, 'sap_community')
+                
+                time.sleep(2)
+            except Exception as e:
+                print(f"    ⚠️  Error: {e}")
     
-    for search_url in search_urls:
+    # ============== GitHub Source ==============
+    def scrape_github_sap_repos(self):
+        """Scrape from GitHub SAP-related repositories"""
+        print("\n🟠 Scraping GitHub SAP repositories...")
+        
         try:
-            print(f"  Searching: {search_url}")
-            response = requests.get(
-                search_url, 
-                timeout=15,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            )
+            search_url = "https://api.github.com/search/repositories?q=SAP+language:python&sort=stars&order=desc&per_page=20"
+            response = requests.get(search_url, headers=self.headers, timeout=10)
+            repos = response.json().get('items', [])
+            
+            for repo in repos:
+                try:
+                    readme_url = f"https://raw.githubusercontent.com/{repo['full_name']}/main/README.md"
+                    readme_response = requests.get(readme_url, timeout=10)
+                    
+                    if readme_response.status_code == 200:
+                        content = readme_response.text
+                        if len(content) > 300:
+                            self.add_to_dataset({
+                                'url': readme_url,
+                                'title': f"GitHub: {repo['name']}",
+                                'content': content,
+                                'description': repo.get('description', ''),
+                                'source': 'github',
+                                'content_type': 'markdown'
+                            })
+                            print(f"    ✅ Added: {repo['name']}")
+                except:
+                    pass
+                
+                time.sleep(1)
+        except Exception as e:
+            print(f"  ⚠️  GitHub Error: {e}")
+    
+    # ============== Dev.to ==============
+    def scrape_devto_articles(self):
+        """Scrape from dev.to"""
+        print("\n🟢 Scraping Dev.to articles...")
+        
+        try:
+            api_url = "https://dev.to/api/articles?tag=sap&per_page=30"
+            response = requests.get(api_url, headers=self.headers, timeout=10)
+            articles = response.json()
+            
+            for article in articles:
+                if article['readable_publish_date']:
+                    content = article.get('body_markdown', '') or article.get('description', '')
+                    self.add_to_dataset({
+                        'url': article['url'],
+                        'title': article['title'],
+                        'content': content,
+                        'author': article['user']['name'],
+                        'source': 'devto',
+                        'published': article['published_at']
+                    })
+                    print(f"    ✅ Added: {article['title'][:50]}")
+                
+                time.sleep(0.5)
+        except Exception as e:
+            print(f"  ⚠️  Error: {e}")
+    
+    def scrape_article(self, url, source):
+        """Scrape article with structured parsing"""
+        try:
+            response = requests.get(url, headers=self.headers, timeout=10)
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Look for actual article links - more specific patterns
-            article_links = soup.find_all('a', href=re.compile(r'/ba-p/\d+'))
+            # Extract title
+            title = soup.find('h1')
+            if title:
+                title = title.get_text().strip()
+            else:
+                title = "SAP Article"
             
-            for link in article_links:
-                href = link.get('href', '')
-                if '/ba-p/' in href and 'tab' not in href:  # Avoid tabbed pages
-                    full_url = urljoin('https://community.sap.com', href)
-                    # Make sure it's a direct article URL, not a listing
-                    if re.match(r'https://community\.sap\.com/t5/.+?/ba-p/\d+', full_url):
-                        all_urls.add(full_url)
+            # Extract content
+            content_elem = soup.find(['article', 'div'], class_=re.compile('content|post|message', re.I))
+            if content_elem:
+                content = content_elem.get_text()
+            else:
+                body = soup.find(['body', 'main'])
+                content = body.get_text() if body else ""
             
-            print(f"    Found {len(article_links)} potential articles")
-            time.sleep(2)  # Be respectful
+            # Clean content
+            content = re.sub(r'\s+', ' ', content).strip()
             
+            if len(content) > 300:
+                self.add_to_dataset({
+                    'url': url,
+                    'title': title,
+                    'content': content[:10000],
+                    'source': source
+                })
+                print(f"    ✅ Added: {title[:40]}")
+                return True
         except Exception as e:
-            print(f"❌ Error processing {search_url}: {e}")
+            print(f"    ⚠️  Error: {e}")
+        
+        return False
     
-    urls_list = list(all_urls)
-    print(f"✅ Found {len(urls_list)} unique article URLs")
-    return urls_list
-
-def scrape_article_content(url):
-    """Scrape detailed content from individual article pages"""
-    try:
-        print(f"    Scraping: {url}")
-        response = requests.get(
-            url, 
-            timeout=15,
-            headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        )
-        soup = BeautifulSoup(response.content, 'html.parser')
+    def add_to_dataset(self, article_data):
+        """Add article to dataset with deduplication"""
+        content_hash = hashlib.md5(
+            article_data.get('content', '').encode()
+        ).hexdigest()[:8]
         
-        # Extract title - more specific selectors
-        title_selectors = [
-            'h1[data-automation-id="title"]',
-            '.blog-post-title',
-            '.article-title',
-            'h1',
-            'title'
-        ]
+        article_data['id'] = content_hash
+        article_data['timestamp'] = datetime.now().isoformat()
         
-        title = ""
-        for selector in title_selectors:
-            title_elem = soup.select_one(selector)
-            if title_elem:
-                title = title_elem.get_text().strip()
-                if title and len(title) > 10:
-                    break
-        
-        if not title:
-            title = "SAP Basis Article"
-        
-        # Extract main content - more comprehensive approach
-        content_selectors = [
-            '.blog-post-content',
-            '.message-body',
-            '.article-content',
-            '[data-automation-id="messageBody"]',
-            'article',
-            'main'
-        ]
-        
-        content_parts = []
-        
-        for selector in content_selectors:
-            elements = soup.select(selector)
-            for elem in elements:
-                # Get all text paragraphs
-                paragraphs = elem.find_all(['p', 'div'], string=True)
-                for p in paragraphs:
-                    text = p.get_text().strip()
-                    if len(text) > 50:  # Only substantial paragraphs
-                        content_parts.append(text)
-        
-        # If no structured content found, try to get meaningful text
-        if not content_parts:
-            all_text = soup.get_text()
-            # Split into paragraphs and filter meaningful ones
-            paragraphs = [p.strip() for p in all_text.split('\n\n') if len(p.strip()) > 100]
-            content_parts.extend(paragraphs)
-        
-        content = '\n\n'.join(content_parts)
-        content = re.sub(r'\s+', ' ', content).strip()
-        
-        # Clean up the content
-        content = re.sub(r'Share.*?Like\.?', '', content, flags=re.IGNORECASE)
-        content = re.sub(r'You must be a.*?Log in', '', content, flags=re.IGNORECASE)
-        content = re.sub(r'View\s*\d+\s*replies?', '', content, flags=re.IGNORECASE)
-        
-        if len(content) > 300:  # Only keep substantial articles
-            article_data = {
-                'url': url,
-                'title': title,
-                'content': content,
-                'content_length': len(content),
-                'source': 'sap_community',
-                'scraped_at': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            print(f"      ✅ Content: {len(content)} characters")
-            return article_data
-        else:
-            print(f"      ⚠️  Content too short: {len(content)} characters")
-        
-    except Exception as e:
-        print(f"❌ Error scraping article {url}: {e}")
+        self.dataset.append(article_data)
     
-    return None
-
-def build_comprehensive_dataset():
-    """Build a comprehensive SAP Basis dataset"""
-    setup_directories()
-    
-    print("🚀 Starting comprehensive SAP Basis dataset build...")
-    
-    # Discover article URLs
-    article_urls = discover_article_urls()
-    
-    if not article_urls:
-        print("❌ No article URLs found. The website structure might have changed.")
-        return []
-    
-    # Scrape article content
-    dataset = []
-    successful = 0
-    
-    print(f"\n📄 Scraping {len(article_urls)} articles...")
-    for i, url in enumerate(article_urls):
-        print(f"  [{i+1}/{len(article_urls)}] Processing article...")
+    def build(self):
+        """Build comprehensive dataset"""
+        print("🚀 Starting comprehensive SAP dataset build...")
+        self.setup_directories()
         
-        article_data = scrape_article_content(url)
-        if article_data:
-            dataset.append(article_data)
-            successful += 1
-            print(f"      ✅ Added to dataset (Total: {successful})")
-        else:
-            print(f"      ❌ Failed to extract content")
+        self.scrape_sap_community()
+        self.scrape_github_sap_repos()
+        self.scrape_devto_articles()
         
-        time.sleep(3)  # Be very respectful to avoid rate limiting
-    
-    # Save dataset
-    output_file = "data/sap_basis_dataset.json"
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(dataset, f, indent=2, ensure_ascii=False, ensure_ascii=False)
-    
-    # Print summary
-    total_content = sum(len(article.get('content', '')) for article in dataset)
-    print(f"\n🎉 Dataset build completed!")
-    print(f"   📊 Articles: {successful}/{len(article_urls)}")
-    print(f"   📝 Total content: {total_content:,} characters")
-    print(f"   💾 Saved to: {output_file}")
-    
-    return dataset
-
-# Alternative: Manual URL list for guaranteed content
-def build_from_known_urls():
-    """Build dataset from known SAP Basis articles"""
-    known_articles = [
-        "https://community.sap.com/t5/technology-blogs/sap-basis-administration-a-comprehensive-guide/ba-p/13567847",
-        "https://community.sap.com/t5/technology-blogs/understanding-sap-transport-management-system-tms/ba-p/13567845",
-        "https://community.sap.com/t5/technology-blogs/sap-work-process-monitoring-sm50-and-sm66/ba-p/13567843",
-        "https://community.sap.com/t5/technology-blogs/sap-system-log-analysis-with-sm21/ba-p/13567841",
-        "https://community.sap.com/t5/technology-blogs/sap-background-job-management-a-complete-guide/ba-p/13567839",
-        "https://community.sap.com/t5/technology-blogs/sap-client-administration-best-practices/ba-p/13567837",
-        "https://community.sap.com/t5/technology-blogs/sap-security-and-authorization-concepts/ba-p/13567835",
-        "https://community.sap.com/t5/technology-blogs/sap-kernel-and-patch-management/ba-p/13567833",
-        "https://community.sap.com/t5/technology-blogs/sap-database-administration-overview/ba-p/13567831",
-        "https://community.sap.com/t5/technology-blogs/sap-performance-monitoring-and-optimization/ba-p/13567829",
-    ]
-    
-    dataset = []
-    for url in known_articles:
-        article_data = scrape_article_content(url)
-        if article_data:
-            dataset.append(article_data)
-        time.sleep(2)
-    
-    return dataset
+        # Save dataset
+        output_file = "data/sap_dataset.json"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(self.dataset, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n✅ Dataset build completed!")
+        print(f"   📊 Total documents: {len(self.dataset)}")
+        print(f"   💾 Saved to: {output_file}")
+        
+        return self.dataset
 
 if __name__ == "__main__":
-    # Try comprehensive discovery first
-    dataset = build_comprehensive_dataset()
-    
-    # If that fails, use known URLs as fallback
-    if len(dataset) < 5:
-        print("\n🔄 Comprehensive discovery yielded few results. Trying known URLs...")
-        dataset = build_from_known_urls()
-    
-    if dataset:
-        output_file = "data/sap_basis_dataset.json"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(dataset, f, indent=2, ensure_ascii=False)
-        print(f"✅ Final dataset: {len(dataset)} articles")
-    else:
-        print("❌ Failed to build dataset")
+    builder = SAPDatasetBuilder()
+    dataset = builder.build()
