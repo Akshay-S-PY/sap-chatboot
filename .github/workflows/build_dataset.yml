@@ -33,16 +33,16 @@ jobs:
         run: |
           if [ -f "data/sap_dataset.json" ]; then
             echo "Dataset info:"
-            python -c "
-            import json
-            with open('data/sap_dataset.json', 'r') as f:
-                data = json.load(f)
-            print(f'Articles: {len(data)}')
-            total_chars = sum(len(article.get('content', '')) for article in data)
-            print(f'Total characters: {total_chars:,}')
-            avg_length = total_chars / len(data) if data else 0
-            print(f'Average article length: {avg_length:,.0f} characters')
-            "
+            python << 'EOF'
+import json
+with open('data/sap_dataset.json', 'r') as f:
+    data = json.load(f)
+print(f'Articles: {len(data)}')
+total_chars = sum(len(article.get('content', '')) for article in data)
+print(f'Total characters: {total_chars:,}')
+avg_length = total_chars / len(data) if data else 0
+print(f'Average article length: {avg_length:,.0f} characters')
+EOF
           else
             echo "❌ No dataset file created"
             exit 1
