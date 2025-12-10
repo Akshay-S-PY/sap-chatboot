@@ -35,14 +35,22 @@ jobs:
             echo "Dataset info:"
             python << 'EOF'
 import json
+from pathlib import Path
+
 with open('data/sap_dataset.json', 'r') as f:
     data = json.load(f)
+
 print(f'Articles: {len(data)}')
 total_chars = sum(len(article.get('content', '')) for article in data)
 print(f'Total characters: {total_chars:,}')
 avg_length = total_chars / len(data) if data else 0
-                echo "Dataset file(s):"
-                ls -la data/sap_dataset.json || true
+print(f'Average length: {avg_length:,.0f} chars')
+
+p = Path('data/sap_dataset.json')
+print(f'File: {p} | size: {p.stat().st_size:,} bytes')
+EOF
+            echo "Dataset file(s):"
+            ls -la data/sap_dataset.json || true
           else
             echo "❌ No dataset file created"
             exit 1
@@ -50,10 +58,7 @@ avg_length = total_chars / len(data) if data else 0
           
       - name: 🚀 Upload to Hugging Face
         env:
-      from pathlib import Path
-
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      print(f'File: {p} | size: {p.stat().st_size:,} bytes')
           HF_DATASET_REPO: ${{ secrets.HF_DATASET_REPO }}
         run: |
           python tools/upload_to_hf.py
