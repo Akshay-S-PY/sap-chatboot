@@ -47,7 +47,7 @@ jobs:
         env:
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
-          HF_SPACE: Psytamaa/sap-chatboot
+          HF_SPACE: Psytamaa/sap-chatbot
         run: |
           set -e
           SPACE_GIT="https://$HF_USERNAME:$HF_WRITE_TOKEN@huggingface.co/spaces/$HF_SPACE.git"
