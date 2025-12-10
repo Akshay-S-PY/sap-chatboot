@@ -1,66 +1,111 @@
+# app.py
 import os
 import streamlit as st
 from huggingface_hub import InferenceApi
 from supabase import create_client
 import numpy as np
+import json
+from typing import List
 
-# ---- Config (read from env / Space secrets) ----
+# -------- CONFIG ----------
 HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 RESULTS_K = int(os.environ.get("RESULTS_K", 5))
 
+# -------- VALIDATE ----------
 if not HF_API_TOKEN or not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Missing one of HF_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY. Add them as Space Secrets.")
+    st.error("Missing required secrets: HF_API_TOKEN, SUPABASE_URL, SUPABASE_ANON_KEY. Add them as Space Secrets.")
     st.stop()
 
-# ---- Clients ----
+# -------- CLIENTS ----------
 inference = InferenceApi(repo_id=EMBEDDING_MODEL, token=HF_API_TOKEN)
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+# --------- HELPERS ----------
+def compute_embedding(text: str) -> List[float]:
+    """
+    Call HF Inference API for embeddings. Returns a flat list[float].
+    """
+    # For sentence-transformers style models, the inference API often returns list[list[float]]
+    out = inference(inputs=text)
+    # handle error dict
+    if isinstance(out, dict) and out.get("error"):
+        raise RuntimeError(out.get("error"))
+    # flatten edge cases
+    if isinstance(out, list) and len(out) > 0 and isinstance(out[0], list):
+        vec = out[0]
+    elif isinstance(out, list) and all(isinstance(x, (int, float)) for x in out):
+        vec = out
+    elif isinstance(out, (dict, str)):
+        # sometimes API returns a dict-like response; try to find 'embedding' key
+        if isinstance(out, dict) and "embedding" in out:
+            vec = out["embedding"]
+        else:
+            raise RuntimeError(f"Unexpected HF output: {out}")
+    else:
+        raise RuntimeError(f"Unexpected HF output type: {type(out)}")
+    # ensure floats
+    return [float(x) for x in vec]
+
+def search_supabase(query_vector: List[float], k: int = RESULTS_K):
+    """
+    Call the Postgres RPC function `search_documents` created in Supabase.
+    """
+    # Supabase client expects JSON serializable types
+    payload = {"query_embedding": query_vector, "k": k}
+    resp = supabase.rpc("search_documents", payload).execute()
+    if getattr(resp, "error", None):
+        raise RuntimeError(f"Supabase RPC error: {resp.error}")
+    return resp.data or []
+
+# --------- UI ----------
+st.set_page_config(page_title="SAP Docs Q&A", page_icon="🔎")
 st.title("SAP Docs Q&A — demo")
 
-q = st.text_input("Ask a question about SAP docs:", "")
+st.markdown(
+    "Ask a question about SAP documentation. The system computes embeddings (Hugging Face) "
+    "and finds relevant document chunks (Supabase pgvector)."
+)
 
-if st.button("Search") and q.strip():
-    with st.spinner("Computing embeddings..."):
-        # Hugging Face InferenceApi for embeddings returns list[float]
-        emb_res = inference(inputs=q)  # for sentence transformers, this returns embedding vector
-        # Some models return nested lists; flatten robustly:
-        if isinstance(emb_res, dict) and "error" in emb_res:
-            st.error(f"Hugging Face error: {emb_res['error']}")
-            st.stop()
-        # Try to coerce into 1D float list
-        if isinstance(emb_res, list) and len(emb_res) > 0 and isinstance(emb_res[0], list):
-            query_vector = emb_res[0]
-        else:
-            query_vector = emb_res
+with st.form("query_form"):
+    q = st.text_input("Question", max_chars=800, key="q")
+    k = st.slider("Results (k)", min_value=1, max_value=20, value=RESULTS_K)
+    submitted = st.form_submit_button("Search")
 
-    # Convert to Python list of floats (Postgres expects array-like)
-    query_vector = [float(x) for x in query_vector]
-
-    with st.spinner("Querying Supabase..."):
-        # Call the search_documents RPC we created server-side
-        # supabase.rpc expects the parameter names to match function signature
-        # We pass query_embedding as a list (Postgres 'vector' accepts array-like)
+if submitted and q and q.strip():
+    q = q.strip()
+    with st.spinner("Computing embedding..."):
         try:
-            # Note: the python supabase client will convert the list to a JSON payload
-            rpc_resp = supabase.rpc("search_documents", {"query_embedding": query_vector, "k": RESULTS_K}).execute()
+            qvec = compute_embedding(q)
         except Exception as e:
-            st.error(f"Error calling Supabase RPC: {e}")
+            st.error(f"Embedding failed: {e}")
             st.stop()
 
-        if rpc_resp.error:
-            st.error(f"Supabase error: {rpc_resp.error.message if hasattr(rpc_resp.error, 'message') else rpc_resp.error}")
+    with st.spinner("Searching Supabase..."):
+        try:
+            rows = search_supabase(qvec, k)
+        except Exception as e:
+            st.error(f"Search failed: {e}")
             st.stop()
 
-        rows = rpc_resp.data or []
-        if not rows:
-            st.info("No results found.")
-        else:
-            st.success(f"Found {len(rows)} results")
-            for r in rows:
-                st.markdown(f"**{r.get('title','(no title)')}** — chunk {r.get('chunk_id')}, similarity: {r.get('similarity'):.4f}")
-                st.write(r.get("content", "")[:1000])  # show first 1k chars
-                st.markdown("---")
+    if not rows:
+        st.info("No matches found.")
+    else:
+        st.success(f"Found {len(rows)} chunks")
+        # Simple aggregation: show results ordered by similarity
+        for r in rows:
+            title = r.get("title", "(no title)")
+            chunk_id = r.get("chunk_id", -1)
+            sim = r.get("similarity", 0.0)
+            content = r.get("content", "")
+            st.markdown(f"**{title}** — chunk {chunk_id} — similarity {sim:.4f}")
+            st.write(content[:2000])
+            st.markdown("---")
+
+# Optional: show debug / health
+with st.expander("Diagnostics"):
+    st.write(f"Embedding model: `{EMBEDDING_MODEL}`")
+    st.write(f"Supabase URL: `{SUPABASE_URL}`")
+    st.write(f"Results per query: {RESULTS_K}")
