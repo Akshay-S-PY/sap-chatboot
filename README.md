@@ -1,3 +1,14 @@
+---
+title: SAP Chatbot
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: 1.28.0
+app_file: app.py
+pinned: false
+---
+
 # 🧩 SAP Intelligent Assistant
 
 A free, open-source **RAG (Retrieval-Augmented Generation)** system for answering SAP-related questions using cloud LLMs and vector databases.
