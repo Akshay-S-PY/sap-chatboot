@@ -31,14 +31,14 @@ jobs:
           # Clone or init space repo
           git clone --depth 1 "$SPACE_GIT" space || (mkdir space && cd space && git init && git remote add origin "$SPACE_GIT")
           
-          # Sync files from GitHub to Space
+          # Sync files from GitHub to Space (ignore vanishing file warnings)
           cd space
           git checkout -B main
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           
           cd ..
-          rsync -av --delete --exclude .git --exclude .gitignore . space/
+          rsync -av --delete --exclude .git --exclude .gitignore --exclude .github . space/ || [ $? -eq 24 ] && echo "rsync completed with vanishing file warnings (ok)"
           
           cd space
           git add -A
