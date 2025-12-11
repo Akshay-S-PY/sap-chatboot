@@ -1,7 +1,7 @@
 # app.py
 import os
 import streamlit as st
-from huggingface_hub import InferenceApi
+from huggingface_hub import InferenceClient
 from supabase import create_client
 import numpy as np
 import json
@@ -20,7 +20,7 @@ if not HF_API_TOKEN or not SUPABASE_URL or not SUPABASE_ANON_KEY:
     st.stop()
 
 # -------- CLIENTS ----------
-inference = InferenceApi(repo_id=EMBEDDING_MODEL, token=HF_API_TOKEN)
+client = InferenceClient(token=HF_API_TOKEN)
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 # --------- HELPERS ----------
@@ -28,25 +28,22 @@ def compute_embedding(text: str) -> List[float]:
     """
     Call HF Inference API for embeddings. Returns a flat list[float].
     """
-    # For sentence-transformers style models, the inference API often returns list[list[float]]
-    out = inference(inputs=text)
-    # handle error dict
-    if isinstance(out, dict) and out.get("error"):
-        raise RuntimeError(out.get("error"))
-    # flatten edge cases
-    if isinstance(out, list) and len(out) > 0 and isinstance(out[0], list):
-        vec = out[0]
-    elif isinstance(out, list) and all(isinstance(x, (int, float)) for x in out):
-        vec = out
-    elif isinstance(out, (dict, str)):
-        # sometimes API returns a dict-like response; try to find 'embedding' key
-        if isinstance(out, dict) and "embedding" in out:
-            vec = out["embedding"]
-        else:
-            raise RuntimeError(f"Unexpected HF output: {out}")
+    # Use the new feature_extraction method
+    result = client.feature_extraction(text, model=EMBEDDING_MODEL)
+    
+    # Convert to list of floats
+    if hasattr(result, 'tolist'):
+        # numpy array
+        vec = result.tolist()
+    elif isinstance(result, list):
+        vec = result
     else:
-        raise RuntimeError(f"Unexpected HF output type: {type(out)}")
-    # ensure floats
+        raise RuntimeError(f"Unexpected embedding result type: {type(result)}")
+    
+    # Flatten if nested (some models return [[...]])
+    if isinstance(vec, list) and len(vec) > 0 and isinstance(vec[0], list):
+        vec = vec[0]
+    
     return [float(x) for x in vec]
 
 def search_supabase(query_vector: List[float], k: int = RESULTS_K):
