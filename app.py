@@ -10,7 +10,7 @@ HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-LLM_MODEL = os.environ.get("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+LLM_MODEL = os.environ.get("LLM_MODEL", "HuggingFaceH4/zephyr-7b-beta")
 RESULTS_K = int(os.environ.get("RESULTS_K", 5))
 
 # -------- VALIDATE ----------
