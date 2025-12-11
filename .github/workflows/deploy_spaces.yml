@@ -22,7 +22,6 @@ jobs:
         env:
           HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
         run: |
-          set -e
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           
@@ -31,14 +30,22 @@ jobs:
           # Clone or init space repo
           git clone --depth 1 "$SPACE_GIT" space || (mkdir space && cd space && git init && git remote add origin "$SPACE_GIT")
           
-          # Sync files from GitHub to Space (ignore vanishing file warnings)
+          # Sync files from GitHub to Space
           cd space
           git checkout -B main
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
           
           cd ..
-          rsync -av --delete --exclude .git --exclude .gitignore --exclude .github . space/ || [ $? -eq 24 ] && echo "rsync completed with vanishing file warnings (ok)"
+          # rsync with exit code handling: 0=success, 24=vanished files (ok)
+          rsync -av --delete --exclude .git --exclude .gitignore --exclude .github . space/
+          RSYNC_EXIT=$?
+          if [ $RSYNC_EXIT -eq 0 ] || [ $RSYNC_EXIT -eq 24 ]; then
+            echo "rsync completed successfully (exit code: $RSYNC_EXIT)"
+          else
+            echo "rsync failed with exit code: $RSYNC_EXIT"
+            exit $RSYNC_EXIT
+          fi
           
           cd space
           git add -A
