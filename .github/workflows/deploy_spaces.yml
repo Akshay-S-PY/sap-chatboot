@@ -22,42 +22,61 @@ jobs:
         env:
           HF_WRITE_TOKEN: ${{ secrets.HF_WRITE_TOKEN }}
         run: |
+          # Configure git
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           
-          SPACE_GIT="https://$HF_WRITE_TOKEN@huggingface.co/spaces/Psytamaa/sap-chatbot"
-          
-          # Clone or init space repo
-          git clone --depth 1 "$SPACE_GIT" space || (mkdir space && cd space && git init && git remote add origin "$SPACE_GIT")
-          
-          # Sync files from GitHub to Space
-          cd space
-          git checkout -B main
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          
-          cd ..
-          # rsync with exit code handling: 0=success, 24=vanished files (ok)
-          rsync -av --delete --exclude .git --exclude .gitignore --exclude .github . space/
-          RSYNC_EXIT=$?
-          if [ $RSYNC_EXIT -eq 0 ] || [ $RSYNC_EXIT -eq 24 ]; then
-            echo "rsync completed successfully (exit code: $RSYNC_EXIT)"
-          else
-            echo "rsync failed with exit code: $RSYNC_EXIT"
-            exit $RSYNC_EXIT
-          fi
-          
-          cd space
-          git add -A
-          
-          # Export git identity env vars for commit
           export GIT_AUTHOR_NAME="github-actions[bot]"
           export GIT_AUTHOR_EMAIL="github-actions[bot]@users.noreply.github.com"
           export GIT_COMMITTER_NAME="github-actions[bot]"
           export GIT_COMMITTER_EMAIL="github-actions[bot]@users.noreply.github.com"
           
-          git commit -m "Deploy Streamlit app from GitHub" || echo "No changes to commit"
-          git push origin HEAD:main --force
+          SPACE_GIT="https://oauth2:${HF_WRITE_TOKEN}@huggingface.co/spaces/Psytamaa/sap-chatbot"
+          
+          # Clone existing space or create new
+          if git clone --depth 1 "$SPACE_GIT" hf_space 2>/dev/null; then
+            echo "✅ Cloned existing Space"
+          else
+            echo "📁 Initializing new Space"
+            mkdir -p hf_space
+            cd hf_space
+            git init
+            git remote add origin "$SPACE_GIT"
+            cd ..
+          fi
+          
+          # Configure git in cloned repo
+          cd hf_space
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -B main 2>/dev/null || true
+          cd ..
+          
+          # Sync files (rsync exit code 24 = some files vanished, which is OK)
+          rsync -av --delete \
+            --exclude '.git' \
+            --exclude '.gitignore' \
+            --exclude '.github' \
+            --exclude 'hf_space' \
+            --exclude 'space' \
+            . hf_space/ || RSYNC_EXIT=$?
+          
+          if [ "${RSYNC_EXIT:-0}" -ne 0 ] && [ "${RSYNC_EXIT:-0}" -ne 24 ]; then
+            echo "❌ rsync failed with exit code $RSYNC_EXIT"
+            exit 1
+          fi
+          
+          # Commit and push
+          cd hf_space
+          git add -A
+          
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to deploy"
+          else
+            git commit -m "Deploy from GitHub Actions $(date -u +%Y-%m-%d_%H:%M:%S)"
+            git push origin main --force
+            echo "✅ Successfully deployed!"
+          fi
 
       - name: ✅ Deploy complete
         run: |
